@@ -1,10 +1,12 @@
-import React, { useEffect, useCallback } from 'react'
+import React, { useEffect, useCallback, useRef } from 'react'
 import { useAppStore } from './state/useAppStore'
 import { WorkspaceGrid } from './components/WorkspaceGrid'
 import { Sidebar } from './components/Sidebar'
 import { NewPanelModal } from './components/NewPanelModal'
 import { TemplateModal } from './components/TemplateModal'
-import { Plus, Bell, Bookmark } from 'lucide-react'
+import { AgentLaunchModal } from './components/AgentLaunchModal'
+import { CommandBar } from './components/CommandBar'
+import { Plus, Bell, Bookmark, Rocket } from 'lucide-react'
 
 export const App: React.FC = () => {
   const {
@@ -17,10 +19,15 @@ export const App: React.FC = () => {
     lastUsedFolder,
     isNewPanelModalOpen,
     isTemplateModalOpen,
+    isLaunchModalOpen,
     searchPanelId,
+    agentDetection,
+    isDetectingAgents,
+    refreshAgents,
     setSearchPanelId,
     setIsNewPanelModalOpen,
     setIsTemplateModalOpen,
+    setIsLaunchModalOpen,
     selectPanel,
     toggleMaximize,
     setLayout,
@@ -29,10 +36,15 @@ export const App: React.FC = () => {
     updatePanel,
     switchWorkspace,
     createWorkspace,
+    launchLineup,
+    sendPrompt,
+    startAgentWithPrompt,
     launchAgent,
     restartAgent,
     focusNextUnread
   } = useAppStore()
+
+  const commandInputRef = useRef<HTMLTextAreaElement>(null)
 
   // Calculate total unread count for header badge
   const totalUnread = activeWorkspace
@@ -47,6 +59,14 @@ export const App: React.FC = () => {
       if (isCmd && !e.shiftKey && !e.altKey && e.key === 'n') {
         e.preventDefault()
         setIsNewPanelModalOpen(true)
+        return
+      }
+
+      // Focus the command bar. Inside a terminal xterm.js takes Ctrl+L (clear
+      // screen) itself, so only Cmd+L reaches this there.
+      if (isCmd && !e.shiftKey && !e.altKey && e.key === 'l') {
+        e.preventDefault()
+        commandInputRef.current?.focus()
         return
       }
 
@@ -150,6 +170,8 @@ export const App: React.FC = () => {
     )
   }
 
+  const activePanelCwd = activeWorkspace.panels.find((p) => p.id === activePanelId)?.cwd || '/'
+
   return (
     <div className="app-container">
       {/* Title Bar */}
@@ -175,6 +197,16 @@ export const App: React.FC = () => {
 
           <button
             className="btn btn-sm"
+            onClick={() => setIsLaunchModalOpen(true)}
+            title="Launch several agents in a new workspace"
+            data-open-launch
+          >
+            <Rocket size={12} />
+            <span>Launch</span>
+          </button>
+
+          <button
+            className="btn btn-sm"
             onClick={() => setIsTemplateModalOpen(true)}
             title="Workspace templates"
           >
@@ -186,6 +218,7 @@ export const App: React.FC = () => {
             className="btn btn-sm btn-primary"
             onClick={() => setIsNewPanelModalOpen(true)}
             title="Add panel (Cmd+N)"
+            data-open-new-panel
           >
             <Plus size={12} />
             <span>New Panel</span>
@@ -208,35 +241,53 @@ export const App: React.FC = () => {
           onOpenTemplates={() => setIsTemplateModalOpen(true)}
         />
 
-        <WorkspaceGrid
-          workspace={activeWorkspace}
-          activePanelId={activePanelId}
-          maximizedPanelId={maximizedPanelId}
-          panelStatuses={panelStatuses}
-          searchPanelId={searchPanelId}
-          onSelectPanel={selectPanel}
-          onToggleMaximize={toggleMaximize}
-          onClosePanel={removePanel}
-          onLaunchAgent={launchAgent}
-          onRestartAgent={restartAgent}
-          onToggleSearch={(id) => setSearchPanelId((curr) => (curr === id ? null : id))}
-          onUpdatePanel={updatePanel}
-          onAddNewPanel={() => setIsNewPanelModalOpen(true)}
-        />
+        <div className="workspace-column">
+          <WorkspaceGrid
+            workspace={activeWorkspace}
+            activePanelId={activePanelId}
+            maximizedPanelId={maximizedPanelId}
+            panelStatuses={panelStatuses}
+            searchPanelId={searchPanelId}
+            onSelectPanel={selectPanel}
+            onToggleMaximize={toggleMaximize}
+            onClosePanel={removePanel}
+            onLaunchAgent={launchAgent}
+            onRestartAgent={restartAgent}
+            onToggleSearch={(id) => setSearchPanelId((curr) => (curr === id ? null : id))}
+            onUpdatePanel={updatePanel}
+            onAddNewPanel={() => setIsNewPanelModalOpen(true)}
+          />
+          <CommandBar
+            workspace={activeWorkspace}
+            activePanelId={activePanelId}
+            panelStatuses={panelStatuses}
+            detection={agentDetection}
+            inputRef={commandInputRef}
+            onSendPrompt={sendPrompt}
+            onStartAgent={startAgentWithPrompt}
+          />
+        </div>
       </div>
 
       {/* Modals */}
       <NewPanelModal
         isOpen={isNewPanelModalOpen}
-        defaultCwd={
-          activeWorkspace.panels.find((p) => p.id === activePanelId)?.cwd ||
-          process.env.HOME ||
-          '/'
-        }
+        defaultCwd={activePanelCwd}
         lastUsedFolder={lastUsedFolder}
         agentSettings={agentSettings}
+        detection={agentDetection}
+        isDetecting={isDetectingAgents}
+        onRefreshAgents={() => void refreshAgents(true)}
         onClose={() => setIsNewPanelModalOpen(false)}
-        onCreate={addPanel}
+        onCreate={(panel, folder, options) => void addPanel(panel, folder, options)}
+      />
+
+      <AgentLaunchModal
+        isOpen={isLaunchModalOpen}
+        defaultCwd={lastUsedFolder || activePanelCwd}
+        detection={agentDetection}
+        onClose={() => setIsLaunchModalOpen(false)}
+        onLaunch={(name, cwd, lineup) => void launchLineup(name, cwd, lineup)}
       />
 
       <TemplateModal

@@ -6,6 +6,11 @@ import { resolveDefaultShell } from './launch-script'
 
 // v1: panels carried runtime fields (status, unread, autoLaunch).
 // v2: panels hold configuration only; agentSettings always complete.
+//
+// More agents (gemini, opencode, ...) did not need v3: a panel's `agent` is
+// still a string with its command in `agentCommand`, and agentSettings only
+// gains optional entries next to claude and codex. Earlier v2 builds keep
+// unknown keys and launch such a panel by its agentCommand.
 export const CURRENT_SCHEMA_VERSION = 2
 
 // Runtime-only (or launch-intent) fields that must never be persisted.

@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
+  PROMPT_SUBMIT_DELAY_MS,
   TerminalRegistry,
   TerminalHandle,
-  TerminalApi
+  TerminalApi,
+  getLaunchSpec
 } from '../src/renderer/src/terminal/terminal-registry'
 import { WebglBudget } from '../src/renderer/src/terminal/webgl-budget'
 import { PanelConfig, SpawnPtyOptions } from '../src/shared/types'
@@ -35,6 +37,10 @@ class FakeTerminal implements TerminalHandle {
   }
   write(data: string): void {
     this.written += data
+  }
+  // xterm sends a paste to its data listeners, like typed input.
+  paste(text: string): void {
+    this.dataListener?.(text)
   }
   onData(listener: (data: string) => void): void {
     this.dataListener = listener
@@ -386,6 +392,38 @@ describe('TerminalRegistry agent launch', () => {
     expect(api.spawns[0].launch).toBeDefined()
   })
 
+  it('passes a first prompt with the agent flag, once', async () => {
+    registry.markLaunchPending('g', 'fix the -x bug')
+    const p = panel('g', { agent: 'gemini', agentCommand: 'gemini' })
+    const slot = mount(p)
+    await settle()
+    registry.detach('g', slot)
+    mount(p, slot)
+    await settle()
+
+    expect(api.spawns).toHaveLength(1)
+    expect(api.spawns[0].launch).toEqual({
+      command: 'gemini',
+      args: undefined,
+      prompt: 'fix the -x bug',
+      promptFlag: '-i'
+    })
+  })
+
+  it('Launch with a prompt restarts the agent with it', async () => {
+    const p = agentPanel('p1')
+    mount(p)
+    await settle()
+    registry.launch(p, 'hello')
+    await settle()
+    expect(api.spawns[1].launch).toEqual({
+      command: 'claude',
+      args: '--verbose',
+      prompt: 'hello',
+      promptFlag: ''
+    })
+  })
+
   it('respawns only when cwd or shell changes', async () => {
     const p = panel('p1')
     mount(p)
@@ -610,5 +648,71 @@ describe('TerminalRegistry autosave', () => {
     api.emit('p1', 'b')
     await vi.advanceTimersByTimeAsync(60_000)
     expect(api.saveCalls).toEqual(['p1'])
+  })
+})
+
+describe('getLaunchSpec', () => {
+  it('drops a prompt for agents that cannot take one', () => {
+    expect(getLaunchSpec(panel('a', { agent: 'aider', agentCommand: 'aider' }), 'x')).toEqual({
+      command: 'aider',
+      args: undefined
+    })
+    expect(getLaunchSpec(panel('c', { agent: 'custom', agentCommand: 'my-bot' }), 'x')).toEqual({
+      command: 'my-bot',
+      args: undefined
+    })
+  })
+
+  it('ignores a blank prompt and never launches a shell panel', () => {
+    expect(getLaunchSpec(panel('a', { agent: 'claude' }), '   ')).toEqual({
+      command: 'claude',
+      args: undefined
+    })
+    expect(getLaunchSpec(panel('s'), 'x')).toBeUndefined()
+  })
+
+  it('runs an agent id this version does not know by its command', () => {
+    const p = panel('n', { agent: 'future-agent' as PanelConfig['agent'], agentCommand: 'fa' })
+    expect(getLaunchSpec(p, 'x')).toEqual({ command: 'fa', args: undefined })
+  })
+})
+
+describe('TerminalRegistry sendPrompt', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('pastes the text, then presses Enter after a pause', async () => {
+    mount(panel('p1', { agent: 'claude' }))
+    await settle()
+    vi.useFakeTimers()
+
+    expect(registry.sendPrompt('p1', 'line one\nline two')).toBe(true)
+    expect(api.writes).toEqual([['p1', 'line one\nline two']])
+    vi.advanceTimersByTime(PROMPT_SUBMIT_DELAY_MS)
+    expect(api.writes).toEqual([
+      ['p1', 'line one\nline two'],
+      ['p1', '\r']
+    ])
+  })
+
+  it('can type without submitting', async () => {
+    mount(panel('p1'))
+    await settle()
+    vi.useFakeTimers()
+    registry.sendPrompt('p1', 'ls', false)
+    vi.advanceTimersByTime(PROMPT_SUBMIT_DELAY_MS * 2)
+    expect(api.writes).toEqual([['p1', 'ls']])
+  })
+
+  it('does nothing for a panel without a terminal, and no Enter after a close', async () => {
+    expect(registry.sendPrompt('ghost', 'x')).toBe(false)
+    mount(panel('p1'))
+    await settle()
+    vi.useFakeTimers()
+    registry.sendPrompt('p1', 'x')
+    registry.destroy('p1')
+    vi.advanceTimersByTime(PROMPT_SUBMIT_DELAY_MS)
+    expect(api.writes).toEqual([['p1', 'x']])
   })
 })

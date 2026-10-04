@@ -6,6 +6,7 @@ import { PersistenceService } from './persistence'
 import { resolveDefaultShell } from './launch-script'
 import { launchEventStatus } from './launch-marker'
 import { isSafeExternalUrl } from './external-links'
+import { AgentDetector } from './agent-detect'
 import { AppState, SpawnPtyOptions } from '../shared/types'
 
 // Handlers and tracker listeners live as long as the app, not the window: a
@@ -128,6 +129,20 @@ export function registerIpcHandlers(
   // System & Shell
   ipcMain.handle('shell:get-default', async () => {
     return resolveDefaultShell()
+  })
+
+  // Whether a program runs in a panel: a launched agent, or any command typed
+  // into its shell (an agent started by hand, for one). The command bar sends
+  // prompts to such a panel instead of starting a new agent.
+  ipcMain.handle('pty:is-busy', async (_event, id: unknown) => {
+    return typeof id === 'string' && ptyManager.busyPanels([id]).length > 0
+  })
+
+  // Which agent CLIs a panel could launch, checked in the login shell with
+  // the commands saved in agent settings.
+  const agentDetector = new AgentDetector(() => persistenceService.loadState().agentSettings)
+  ipcMain.handle('agents:detect', async (_event, refresh?: unknown) => {
+    return agentDetector.detect(refresh === true)
   })
 
   ipcMain.on('app:update-badge', (_event, count: number) => {

@@ -157,6 +157,7 @@ export function createXtermHandle(app: XtermHost): TerminalHandle {
     },
 
     write: (data) => term.write(data),
+    paste: (text) => term.paste(text),
 
     onData(listener) {
       term.onData(listener)

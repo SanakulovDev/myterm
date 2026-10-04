@@ -106,6 +106,9 @@ describe.each(['/bin/zsh', '/bin/bash', '/bin/sh'])('busy panels in %s', (shell)
       run.write('sleep 30\r')
       await waitFor(() => busyIds().includes(run.id), 'sleep to be busy')
       expect(manager.busyPanels()).toEqual([{ id: run.id, process: 'sleep' }])
+      // Asked about one panel, only that panel is checked.
+      expect(manager.busyPanels([run.id])).toEqual([{ id: run.id, process: 'sleep' }])
+      expect(manager.busyPanels(['other'])).toEqual([])
 
       run.write('\x03')
       await waitFor(() => busyIds().length === 0, 'shell idle after Ctrl+C')

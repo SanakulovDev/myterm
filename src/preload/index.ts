@@ -17,6 +17,8 @@ const api: ElectronAPI = {
   deleteScrollback: (panelId: string) => ipcRenderer.invoke('state:delete-scrollback', panelId),
 
   getDefaultShell: () => ipcRenderer.invoke('shell:get-default'),
+  detectAgents: (refresh?: boolean) => ipcRenderer.invoke('agents:detect', refresh === true),
+  isPtyBusy: (id: string) => ipcRenderer.invoke('pty:is-busy', id),
   updateBadge: (count: number) => ipcRenderer.send('app:update-badge', count),
   sendNotification: (title: string, body: string, panelId?: string) =>
     ipcRenderer.send('app:notify', title, body, panelId),

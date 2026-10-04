@@ -1,5 +1,6 @@
 import React from 'react'
 import { PanelConfig, PanelStatus } from '../../../shared/types'
+import { agentColor, agentLabel as labelOf, isAgentPanel as hasAgent } from '../../../shared/agents'
 import {
   Folder,
   Maximize2,
@@ -45,16 +46,11 @@ export const PanelHeader: React.FC<PanelHeaderProps> = ({
     return parts.pop() || cwd
   }
 
-  const agentLabel =
-    panel.agent === 'claude'
-      ? 'Claude Code'
-      : panel.agent === 'codex'
-      ? 'Codex'
-      : 'Shell'
+  const agentLabel = labelOf(panel)
 
   // The agent process is alive while running; waiting/done (from hooks) also
   // mean the agent is still up. Otherwise the panel sits in its fallback shell.
-  const isAgentPanel = panel.agent !== 'none'
+  const isAgentPanel = hasAgent(panel)
   const isAgentAlive = status === 'running' || status === 'waiting' || status === 'done'
 
   return (
@@ -70,8 +66,13 @@ export const PanelHeader: React.FC<PanelHeaderProps> = ({
         </div>
 
         {/* Agent Badge & Icon */}
-        <span className={`agent-badge ${panel.agent}`} title={`Agent: ${agentLabel}`}>
-          {panel.agent !== 'none' ? (
+        <span
+          className={`agent-badge ${isAgentPanel ? 'agent' : 'none'}`}
+          style={isAgentPanel ? ({ '--agent-color': agentColor(panel.agent) } as React.CSSProperties) : undefined}
+          title={`Agent: ${agentLabel}`}
+          data-agent={panel.agent}
+        >
+          {isAgentPanel ? (
             <Bot size={11} style={{ display: 'inline', marginRight: 3, verticalAlign: -1 }} />
           ) : (
             <TerminalIcon size={11} style={{ display: 'inline', marginRight: 3, verticalAlign: -1 }} />
