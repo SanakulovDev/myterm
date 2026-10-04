@@ -1,11 +1,17 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import { PtyManager } from './pty-manager'
 import { AgentTracker } from './agent-tracker'
 import { NotificationService } from './notifications'
 import { PersistenceService } from './persistence'
 import { resolveDefaultShell } from './launch-script'
 import { launchEventStatus } from './launch-marker'
+import { isSafeExternalUrl } from './external-links'
 import { AppState, SpawnPtyOptions } from '../shared/types'
+
+// Handlers and tracker listeners live as long as the app, not the window: a
+// second registration would throw (ipcMain.handle) or deliver every event
+// twice (tracker listeners), so it is refused.
+let registered = false
 
 export function registerIpcHandlers(
   getMainWindow: () => BrowserWindow | null,
@@ -13,26 +19,35 @@ export function registerIpcHandlers(
   agentTracker: AgentTracker,
   notificationService: NotificationService,
   persistenceService: PersistenceService
-): void {
+): boolean {
+  if (registered) {
+    console.error('IPC handlers are already registered; ignoring the second registration')
+    return false
+  }
+  registered = true
+
+  // The window is looked up at send time, never captured: PTYs outlive any
+  // particular window state (hidden, shown, recreated).
+  const send = (channel: string, ...args: unknown[]): void => {
+    const win = getMainWindow()
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send(channel, ...args)
+    }
+  }
+
   // PTY spawn. With `launch`, the agent runs inside the launch shell and the
   // panel status follows the launch events: running -> idle (marker). Done and
   // waiting only come from hooks.
   ipcMain.handle('pty:spawn', async (_event, options: SpawnPtyOptions) => {
-    const win = getMainWindow()
-
     const success = ptyManager.spawn(
       options,
       (data) => {
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('pty:data', options.id, data)
-        }
+        send('pty:data', options.id, data)
         // The output-quiet heuristic (agentTracker.onPtyOutput) is disabled: it
         // would mark a long-thinking agent as done. Hooks provide done/waiting.
       },
       (exitCode) => {
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('pty:exit', options.id, exitCode)
-        }
+        send('pty:exit', options.id, exitCode)
         agentTracker.setStatus(
           options.id,
           exitCode === 0 ? 'exited' : 'error',
@@ -106,6 +121,10 @@ export function registerIpcHandlers(
     return persistenceService.loadScrollback(panelId)
   })
 
+  ipcMain.handle('state:delete-scrollback', async (_event, panelId: string) => {
+    return persistenceService.deleteScrollback(panelId)
+  })
+
   // System & Shell
   ipcMain.handle('shell:get-default', async () => {
     return resolveDefaultShell()
@@ -119,6 +138,11 @@ export function registerIpcHandlers(
     notificationService.notify(title, body, panelId)
   })
 
+  // A Cmd+clicked link in a terminal.
+  ipcMain.on('app:open-external', (_event, url: unknown) => {
+    if (isSafeExternalUrl(url)) void shell.openExternal(url)
+  })
+
   ipcMain.on('panel:focus', (_event, panelId: string) => {
     agentTracker.setActivePanel(panelId)
     notificationService.setFocusedPanel(panelId)
@@ -126,10 +150,7 @@ export function registerIpcHandlers(
 
   // Listen to tracker status changes and forward to renderer
   agentTracker.on('status-change', (event) => {
-    const win = getMainWindow()
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('agent:status', event.panelId, event.status, event.detail)
-    }
+    send('agent:status', event.panelId, event.status, event.detail)
 
     // Spec 5.3: Trigger notification on waiting or done
     if (event.status === 'waiting') {
@@ -152,9 +173,8 @@ export function registerIpcHandlers(
   })
 
   notificationService.onPanelClick((panelId) => {
-    const win = getMainWindow()
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('notification:focus-panel', panelId)
-    }
+    send('notification:focus-panel', panelId)
   })
+
+  return true
 }

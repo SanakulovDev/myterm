@@ -135,22 +135,83 @@ function sanitizeForSave(state: AppState): AppState {
   }
 }
 
+// Saved state and terminal output can contain secrets: owner-only on disk.
+export const PRIVATE_DIR_MODE = 0o700
+export const PRIVATE_FILE_MODE = 0o600
+
+// Panel ids become file names, so anything else is refused.
+const PANEL_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
+
+const SCROLLBACK_SUFFIX = '.log'
+// Temporary files of an atomic write: <panel>.log.tmp-<pid>-<n>
+const TEMP_MARKER = '.tmp-'
+
+let tempCounter = 0
+
+/** Writes `content` to a temp file next to `target`, then renames it over. */
+async function writeFileAtomic(target: string, content: string): Promise<void> {
+  const temp = `${target}${TEMP_MARKER}${process.pid}-${++tempCounter}`
+  try {
+    const handle = await fs.promises.open(temp, 'w', PRIVATE_FILE_MODE)
+    try {
+      await handle.writeFile(content, 'utf8')
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    await fs.promises.rename(temp, target)
+  } catch (err) {
+    await fs.promises.rm(temp, { force: true }).catch(() => undefined)
+    throw err
+  }
+}
+
+function chmodQuiet(target: string, mode: number): void {
+  try {
+    fs.chmodSync(target, mode)
+  } catch {
+    // Missing files need no fixing; anything else is retried next start.
+  }
+}
+
 export class PersistenceService {
   private stateFilePath: string
   private v1BackupPath: string
   private scrollbackDir: string
+  // Scrollback writes and deletes of one panel run in order, one at a time.
+  private readonly scrollbackQueues = new Map<string, Promise<unknown>>()
+  private orphansSwept = false
 
   constructor() {
     const userData = app.getPath('userData')
     this.stateFilePath = path.join(userData, 'workspace-state.json')
     this.v1BackupPath = path.join(userData, 'workspace-state.v1-backup.json')
     this.scrollbackDir = path.join(userData, 'scrollbacks')
-    if (!fs.existsSync(this.scrollbackDir)) {
-      try {
-        fs.mkdirSync(this.scrollbackDir, { recursive: true })
-      } catch (err) {
-        console.error('Failed to create scrollback dir:', err)
-      }
+    try {
+      fs.mkdirSync(this.scrollbackDir, { recursive: true, mode: PRIVATE_DIR_MODE })
+    } catch (err) {
+      console.error('Failed to create scrollback dir:', err)
+    }
+    this.restrictPermissions(userData)
+  }
+
+  /** Files written by older versions were world-readable; tighten them. */
+  private restrictPermissions(userData: string): void {
+    chmodQuiet(this.scrollbackDir, PRIVATE_DIR_MODE)
+    let names: string[] = []
+    try {
+      names = fs.readdirSync(this.scrollbackDir)
+    } catch {
+      // No directory, nothing to fix.
+    }
+    for (const name of names) chmodQuiet(path.join(this.scrollbackDir, name), PRIVATE_FILE_MODE)
+    try {
+      names = fs.readdirSync(userData)
+    } catch {
+      names = []
+    }
+    for (const name of names) {
+      if (name.startsWith('workspace-state.')) chmodQuiet(path.join(userData, name), PRIVATE_FILE_MODE)
     }
   }
 
@@ -177,12 +238,14 @@ export class PersistenceService {
         this.saveState(migrated)
       }
 
+      this.sweepOrphanScrollbacks(migrated)
       return migrated
     } catch (err) {
       console.error('Failed to load state or file corrupted, backing up:', err)
       try {
         const backupPath = `${this.stateFilePath}.corrupt-${Date.now()}`
         fs.renameSync(this.stateFilePath, backupPath)
+        chmodQuiet(backupPath, PRIVATE_FILE_MODE)
       } catch (backupErr) {
         console.error('Failed to backup corrupt state file:', backupErr)
       }
@@ -195,45 +258,122 @@ export class PersistenceService {
     try {
       if (!fs.existsSync(this.v1BackupPath)) {
         fs.copyFileSync(this.stateFilePath, this.v1BackupPath)
+        chmodQuiet(this.v1BackupPath, PRIVATE_FILE_MODE)
       }
     } catch (err) {
       console.error('Failed to back up state before migration:', err)
     }
   }
 
-  public saveState(state: AppState): boolean {
+  /**
+   * Deletes saved output of panels that no longer exist (closed while the
+   * app could not delete the file) and temp files of interrupted writes.
+   * Runs once, and only after the state file loaded cleanly: with a missing
+   * or corrupt state file every saved output would look orphaned.
+   */
+  private sweepOrphanScrollbacks(state: AppState): void {
+    if (this.orphansSwept) return
+    this.orphansSwept = true
+    const panelIds = new Set(state.workspaces.flatMap((ws) => ws.panels.map((p) => p.id)))
+    let names: string[] = []
     try {
-      const tempPath = `${this.stateFilePath}.tmp-${Date.now()}`
+      names = fs.readdirSync(this.scrollbackDir)
+    } catch {
+      return
+    }
+    for (const name of names) {
+      const isTemp = name.includes(`${SCROLLBACK_SUFFIX}${TEMP_MARKER}`)
+      const isOrphan =
+        name.endsWith(SCROLLBACK_SUFFIX) && !panelIds.has(name.slice(0, -SCROLLBACK_SUFFIX.length))
+      if (!isTemp && !isOrphan) continue
+      try {
+        fs.rmSync(path.join(this.scrollbackDir, name), { force: true })
+      } catch (err) {
+        console.error(`Failed to remove stale scrollback ${name}:`, err)
+      }
+    }
+  }
+
+  public saveState(state: AppState): boolean {
+    const tempPath = `${this.stateFilePath}${TEMP_MARKER}${process.pid}-${++tempCounter}`
+    try {
       const json = JSON.stringify(sanitizeForSave(state), null, 2)
-      fs.writeFileSync(tempPath, json, 'utf8')
+      fs.writeFileSync(tempPath, json, { encoding: 'utf8', mode: PRIVATE_FILE_MODE })
       fs.renameSync(tempPath, this.stateFilePath)
       return true
     } catch (err) {
       console.error('Failed to atomically save state:', err)
-      return false
-    }
-  }
-
-  public saveScrollback(panelId: string, content: string): boolean {
-    try {
-      const target = path.join(this.scrollbackDir, `${panelId}.log`)
-      fs.writeFileSync(target, content, 'utf8')
-      return true
-    } catch (err) {
-      console.error(`Failed to save scrollback for ${panelId}:`, err)
-      return false
-    }
-  }
-
-  public loadScrollback(panelId: string): string | null {
-    try {
-      const target = path.join(this.scrollbackDir, `${panelId}.log`)
-      if (fs.existsSync(target)) {
-        return fs.readFileSync(target, 'utf8')
+      try {
+        fs.rmSync(tempPath, { force: true })
+      } catch {
+        // Best effort.
       }
-    } catch (err) {
-      console.error(`Failed to load scrollback for ${panelId}:`, err)
+      return false
     }
-    return null
+  }
+
+  private scrollbackPath(panelId: string): string | null {
+    if (typeof panelId !== 'string' || !PANEL_ID_PATTERN.test(panelId)) {
+      console.error(`Refusing scrollback access for invalid panel id: ${String(panelId)}`)
+      return null
+    }
+    return path.join(this.scrollbackDir, `${panelId}${SCROLLBACK_SUFFIX}`)
+  }
+
+  /** Runs `task` after every earlier scrollback task of the same panel. */
+  private enqueue<T>(panelId: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.scrollbackQueues.get(panelId) ?? Promise.resolve()
+    const result = previous.then(task)
+    const tail = result.catch(() => undefined)
+    this.scrollbackQueues.set(panelId, tail)
+    void tail.then(() => {
+      if (this.scrollbackQueues.get(panelId) === tail) this.scrollbackQueues.delete(panelId)
+    })
+    return result
+  }
+
+  /** Atomic write (temp file + rename), owner-only. Resolves false on failure. */
+  public saveScrollback(panelId: string, content: string): Promise<boolean> {
+    const target = this.scrollbackPath(panelId)
+    if (!target || typeof content !== 'string') return Promise.resolve(false)
+    return this.enqueue(panelId, async () => {
+      try {
+        await writeFileAtomic(target, content)
+        return true
+      } catch (err) {
+        console.error(`Failed to save scrollback for ${panelId}:`, err)
+        return false
+      }
+    })
+  }
+
+  /** Removes a closed panel's saved output, after any write still queued. */
+  public deleteScrollback(panelId: string): Promise<boolean> {
+    const target = this.scrollbackPath(panelId)
+    if (!target) return Promise.resolve(false)
+    return this.enqueue(panelId, async () => {
+      try {
+        await fs.promises.rm(target, { force: true })
+        return true
+      } catch (err) {
+        console.error(`Failed to delete scrollback for ${panelId}:`, err)
+        return false
+      }
+    })
+  }
+
+  public loadScrollback(panelId: string): Promise<string | null> {
+    const target = this.scrollbackPath(panelId)
+    if (!target) return Promise.resolve(null)
+    return this.enqueue(panelId, async () => {
+      try {
+        return await fs.promises.readFile(target, 'utf8')
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          console.error(`Failed to load scrollback for ${panelId}:`, err)
+        }
+        return null
+      }
+    })
   }
 }

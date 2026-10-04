@@ -79,12 +79,18 @@ export interface ElectronAPI {
   saveState: (state: AppState) => Promise<boolean>
   saveScrollback: (panelId: string, content: string) => Promise<boolean>
   loadScrollback: (panelId: string) => Promise<string | null>
+  // Removes a closed panel's saved output.
+  deleteScrollback: (panelId: string) => Promise<boolean>
 
   // System
   getDefaultShell: () => Promise<string>
   updateBadge: (count: number) => void
   sendNotification: (title: string, body: string, panelId?: string) => void
   notifyPanelFocus: (id: string) => void
+  // Opens an http(s) link in the default browser; main ignores anything else.
+  openExternal: (url: string) => void
+  // The file system path of a file dropped on the page ('' when it has none).
+  pathForFile: (file: File) => string
 
   // Events subscriptions
   onPtyData: (callback: (id: string, data: string) => void) => () => void
@@ -95,7 +101,8 @@ export interface ElectronAPI {
   // window closes; it waits for the returned promise (with a timeout).
   onFlushScrollback: (callback: () => Promise<void>) => () => void
 
-  // True when started with MYTERM_DEBUG=1 (enables a read-only test hook).
+  // True only in a dev or test build started with MYTERM_DEBUG=1 (enables a
+  // read-only test hook). Always false in a production build.
   isDebug: boolean
 }
 

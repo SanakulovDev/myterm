@@ -1,5 +1,6 @@
 node_modules
 out
+out-e2e
 dist
 .DS_Store
 *.log

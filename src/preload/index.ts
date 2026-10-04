@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { ElectronAPI, SpawnPtyOptions, AppState, PanelStatus } from '../shared/types'
 
 const api: ElectronAPI = {
@@ -14,12 +14,15 @@ const api: ElectronAPI = {
   saveScrollback: (panelId: string, content: string) =>
     ipcRenderer.invoke('state:save-scrollback', panelId, content),
   loadScrollback: (panelId: string) => ipcRenderer.invoke('state:load-scrollback', panelId),
+  deleteScrollback: (panelId: string) => ipcRenderer.invoke('state:delete-scrollback', panelId),
 
   getDefaultShell: () => ipcRenderer.invoke('shell:get-default'),
   updateBadge: (count: number) => ipcRenderer.send('app:update-badge', count),
   sendNotification: (title: string, body: string, panelId?: string) =>
     ipcRenderer.send('app:notify', title, body, panelId),
   notifyPanelFocus: (id: string) => ipcRenderer.send('panel:focus', id),
+  openExternal: (url: string) => ipcRenderer.send('app:open-external', url),
+  pathForFile: (file: File) => webUtils.getPathForFile(file),
 
   onPtyData: (callback: (id: string, data: string) => void) => {
     const handler = (_event: unknown, id: string, data: string): void => callback(id, data)
@@ -68,7 +71,8 @@ const api: ElectronAPI = {
     }
   },
 
-  isDebug: process.env.MYTERM_DEBUG === '1'
+  // Compiled out of production builds (see src/shared/build-flags.d.ts).
+  isDebug: __MYTERM_TEST_HOOKS__ ? process.env.MYTERM_DEBUG === '1' : false
 }
 
 if (process.contextIsolated) {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   TerminalRegistry,
   TerminalHandle,
@@ -71,7 +71,17 @@ class FakeTerminal implements TerminalHandle {
     }
   }
   debugInfo() {
-    return { cols: this.cols, rows: this.rows, cursorX: 0, cursorY: 0, bufferLength: 0, text: '' }
+    return {
+      cols: this.cols,
+      rows: this.rows,
+      fontFamily: '',
+      fontSize: 0,
+      unicodeVersion: '6',
+      cursorX: 0,
+      cursorY: 0,
+      bufferLength: 0,
+      text: ''
+    }
   }
   dispose(): void {
     this.disposed = true
@@ -83,6 +93,10 @@ class FakeApi implements TerminalApi {
   resizes: Array<[string, number, number]> = []
   writes: Array<[string, string]> = []
   saved = new Map<string, string>()
+  saveCalls: string[] = []
+  deleted: string[] = []
+  // Makes the next saves fail: 'reject' throws, 'false' reports failure.
+  failSaves: 'reject' | 'false' | null = null
   scrollbacks = new Map<string, string>()
   dataListener: ((id: string, data: string) => void) | null = null
 
@@ -104,7 +118,14 @@ class FakeApi implements TerminalApi {
   }
   loadScrollback = async (id: string) => this.scrollbacks.get(id) ?? null
   saveScrollback = async (id: string, content: string) => {
+    this.saveCalls.push(id)
+    if (this.failSaves === 'reject') throw new Error('disk full')
+    if (this.failSaves === 'false') return false
     this.saved.set(id, content)
+    return true
+  }
+  deleteScrollback = async (id: string) => {
+    this.deleted.push(id)
     return true
   }
   emit(id: string, data: string): void {
@@ -144,6 +165,7 @@ beforeEach(() => {
   registry = new TerminalRegistry({
     api,
     budget,
+    idle: async () => undefined,
     createTerminal: () => {
       const term = new FakeTerminal()
       terminals.set(creating ?? `unknown-${terminals.size}`, term)
@@ -398,15 +420,195 @@ describe('TerminalRegistry close and flush', () => {
     expect(api.spawns).toHaveLength(0)
   })
 
-  it('flushScrollback saves every session, shown or not', async () => {
+  it('flushScrollback saves every changed session, shown or not', async () => {
+    const a = mount(panel('a'))
+    mount(panel('b'))
+    mount(panel('c'))
+    await settle()
+    registry.detach('a', a)
+    api.emit('a', 'hidden output')
+    api.emit('b', 'shown output')
+
+    await registry.flushScrollback()
+    expect(api.saved.get('a')).toBe('serialized:hidden output')
+    expect(api.saved.get('b')).toBe('serialized:shown output')
+    // Unchanged since it started: its file is already current.
+    expect(api.saved.has('c')).toBe(false)
+  })
+
+  it('destroy deletes the saved output, also of a panel never shown', async () => {
+    mount(panel('p1'))
+    await settle()
+    registry.destroy('p1')
+    registry.destroy('never-shown')
+    expect(api.deleted).toEqual(['p1', 'never-shown'])
+  })
+})
+
+describe('TerminalRegistry autosave', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('restored scrollback does not count as a change; PTY output does', async () => {
+    api.scrollbacks.set('p1', 'old output')
+    mount(panel('p1'))
+    await settle()
+    await registry.autosave()
+    expect(api.saveCalls).toEqual([])
+
+    api.emit('p1', 'new output')
+    await registry.autosave()
+    expect(api.saved.get('p1')).toBe('serialized:old outputnew output')
+
+    // Nothing new since: the next pass writes nothing.
+    await registry.autosave()
+    expect(api.saveCalls).toEqual(['p1'])
+  })
+
+  it('saves only changed sessions, including hidden ones', async () => {
     const a = mount(panel('a'))
     mount(panel('b'))
     await settle()
     registry.detach('a', a)
-    api.emit('a', 'hidden output')
+    api.emit('a', 'x')
+    await registry.autosave()
+    expect(api.saveCalls).toEqual(['a'])
+  })
 
-    await registry.flushScrollback()
-    expect(api.saved.get('a')).toBe('serialized:hidden output')
-    expect(api.saved.get('b')).toBe('serialized:')
+  it('waits for an idle slot before each panel', async () => {
+    const slots: Array<() => void> = []
+    registry = new TerminalRegistry({
+      api,
+      budget,
+      createTerminal: () => new FakeTerminal(),
+      idle: () => new Promise<void>((resolve) => slots.push(resolve))
+    })
+    mount(panel('a'))
+    mount(panel('b'))
+    await settle()
+    api.emit('a', 'x')
+    api.emit('b', 'y')
+
+    const pass = registry.autosave()
+    await settle()
+    expect(slots).toHaveLength(1)
+    expect(api.saveCalls).toEqual([])
+    slots[0]()
+    await settle()
+    expect(api.saveCalls).toEqual(['a'])
+    expect(slots).toHaveLength(2)
+    slots[1]()
+    await pass
+    expect(api.saveCalls).toEqual(['a', 'b'])
+  })
+
+  it.each(['reject', 'false'] as const)(
+    'a failed save (%s) keeps the panel dirty and the next pass retries',
+    async (failure) => {
+      mount(panel('p1'))
+      await settle()
+      api.emit('p1', 'data')
+
+      api.failSaves = failure
+      await registry.autosave()
+      expect(api.saved.has('p1')).toBe(false)
+      expect(registry.debugSessions()[0].dirty).toBe(true)
+
+      api.failSaves = null
+      await registry.autosave()
+      expect(api.saved.get('p1')).toBe('serialized:data')
+      expect(registry.debugSessions()[0].dirty).toBe(false)
+    }
+  )
+
+  it('a serialize failure keeps the panel dirty', async () => {
+    mount(panel('p1'))
+    await settle()
+    api.emit('p1', 'data')
+    const term = terminals.get('p1')!
+    term.serialize = () => {
+      throw new Error('serialize failed')
+    }
+    await registry.autosave()
+    expect(api.saveCalls).toEqual([])
+    expect(registry.debugSessions()[0].dirty).toBe(true)
+  })
+
+  it('output during a save marks the panel again', async () => {
+    mount(panel('p1'))
+    await settle()
+    api.emit('p1', 'first')
+    let release: () => void = () => undefined
+    api.saveScrollback = async (id: string, content: string) => {
+      api.saveCalls.push(id)
+      await new Promise<void>((resolve) => (release = resolve))
+      api.saved.set(id, content)
+      return true
+    }
+    const pass = registry.autosave()
+    await settle()
+    api.emit('p1', 'second')
+    release()
+    await pass
+    expect(api.saved.get('p1')).toBe('serialized:first')
+    expect(registry.debugSessions()[0].dirty).toBe(true)
+  })
+
+  it('skips a panel closed while waiting for its idle slot', async () => {
+    let slot: () => void = () => undefined
+    registry = new TerminalRegistry({
+      api,
+      budget,
+      createTerminal: () => new FakeTerminal(),
+      idle: () => new Promise<void>((resolve) => (slot = resolve))
+    })
+    mount(panel('p1'))
+    await settle()
+    api.emit('p1', 'x')
+    const pass = registry.autosave()
+    await settle()
+    registry.destroy('p1')
+    slot()
+    await pass
+    expect(api.saveCalls).toEqual([])
+  })
+
+  it('a flush waits for a save already in flight', async () => {
+    mount(panel('p1'))
+    await settle()
+    api.emit('p1', 'data')
+    let release: () => void = () => undefined
+    api.saveScrollback = async (id: string, content: string) => {
+      await new Promise<void>((resolve) => (release = resolve))
+      api.saved.set(id, content)
+      return true
+    }
+    void registry.autosave()
+    await settle()
+    let flushed = false
+    const flush = registry.flushScrollback().then(() => (flushed = true))
+    await settle()
+    expect(flushed).toBe(false)
+    release()
+    await flush
+    expect(api.saved.get('p1')).toBe('serialized:data')
+  })
+
+  it('startAutosave runs a pass every interval until stopped', async () => {
+    vi.useFakeTimers()
+    mount(panel('p1'))
+    await vi.advanceTimersByTimeAsync(0)
+    const stop = registry.startAutosave(30_000)
+    api.emit('p1', 'a')
+    await vi.advanceTimersByTimeAsync(29_999)
+    expect(api.saveCalls).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(api.saveCalls).toEqual(['p1'])
+
+    stop()
+    api.emit('p1', 'b')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(api.saveCalls).toEqual(['p1'])
   })
 })

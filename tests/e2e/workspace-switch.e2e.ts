@@ -278,8 +278,8 @@ describe('workspace switching keeps terminals alive', () => {
     expect(await spawnsOf(newId)).toBe(1)
   })
 
-  it('saves every terminal’s scrollback when the window closes', async () => {
-    await cdp.eval('setTimeout(() => window.close(), 0)').catch(() => undefined)
+  it('saves every terminal’s scrollback when the window is closed (hidden)', async () => {
+    await app.main.eval('globalThis.__mytermMain.window().close()')
 
     const scrollbackDir = path.join(userDataDir, 'scrollbacks')
     const read = (id: string) => {
