@@ -1,5 +1,6 @@
 import { ElectronAPI, LaunchSpec, PanelConfig } from '../../../shared/types'
 import { Disposable, WebglBudget } from './webgl-budget'
+import { whenIdle } from './idle'
 
 // Terminal sessions live outside React. A panel's session (xterm, addons, host
 // element) is created the first time the panel is shown and destroyed only when
@@ -9,6 +10,11 @@ import { Disposable, WebglBudget } from './webgl-budget'
 // One PTY is spawned per session. Workspace switches, maximize/restore and
 // React remounts never spawn or kill a PTY; only Launch/Restart (explicit) and
 // a changed cwd/shell respawn it, as before.
+//
+// Scrollback is saved to disk when a panel's output changed: every
+// AUTOSAVE_INTERVAL_MS, when the window hides, and when the app quits.
+
+export const AUTOSAVE_INTERVAL_MS = 30_000
 
 /** What the registry needs from one xterm instance (see xterm-handle.ts). */
 export interface TerminalHandle {
@@ -37,6 +43,9 @@ export interface TerminalHandle {
 export interface TerminalDebugInfo {
   cols: number
   rows: number
+  fontFamily: string
+  fontSize: number
+  unicodeVersion: string
   cursorX: number
   cursorY: number
   bufferLength: number
@@ -45,13 +54,21 @@ export interface TerminalDebugInfo {
 
 export type TerminalApi = Pick<
   ElectronAPI,
-  'spawnPty' | 'writePty' | 'resizePty' | 'onPtyData' | 'loadScrollback' | 'saveScrollback'
+  | 'spawnPty'
+  | 'writePty'
+  | 'resizePty'
+  | 'onPtyData'
+  | 'loadScrollback'
+  | 'saveScrollback'
+  | 'deleteScrollback'
 >
 
 export interface TerminalRegistryDeps {
   api: TerminalApi
   createTerminal: () => TerminalHandle
   budget: WebglBudget
+  /** Resolves when background work may run (default: whenIdle). */
+  idle?: () => Promise<void>
 }
 
 interface Session {
@@ -64,6 +81,8 @@ interface Session {
   spawns: number
   spawned: { cwd: string; shell: string }
   ptySize: { cols: number; rows: number }
+  // PTY output arrived since the last successful save started.
+  dirty: boolean
 }
 
 export interface SessionDebugInfo {
@@ -72,6 +91,7 @@ export interface SessionDebugInfo {
   attached: boolean
   webgl: boolean
   spawns: number
+  dirty: boolean
 }
 
 export function getLaunchSpec(panel: PanelConfig): LaunchSpec | undefined {
@@ -88,6 +108,10 @@ export class TerminalRegistry {
   // the agent. In memory only, so restored panels never auto-launch.
   private readonly pendingLaunch = new Set<string>()
   private unsubscribeData: (() => void) | null = null
+  private autosaveTimer: ReturnType<typeof setInterval> | null = null
+  private autosaving = false
+  // Scrollback saves still in flight; a flush waits for them too.
+  private readonly saving = new Set<Promise<void>>()
 
   constructor(private readonly deps: TerminalRegistryDeps) {}
 
@@ -181,24 +205,57 @@ export class TerminalRegistry {
     void this.spawn(session, this.pendingLaunch.has(panel.id) ? getLaunchSpec(panel) : undefined)
   }
 
-  /** The panel was closed. The caller kills its PTY. */
+  /** The panel was closed. The caller kills its PTY. Its saved output goes too. */
   destroy(id: string): void {
     this.pendingLaunch.delete(id)
     this.containers.delete(id)
     const session = this.sessions.get(id)
-    if (!session) return
-    this.sessions.delete(id)
-    this.deps.budget.release(id)
-    session.term.dispose()
+    if (session) {
+      this.sessions.delete(id)
+      this.deps.budget.release(id)
+      session.term.dispose()
+    }
+    // Main runs it after any save of this panel already sent.
+    this.deps.api.deleteScrollback(id).catch(() => false)
   }
 
-  /** Saves every live session's scrollback (used when the window closes). */
+  /** Starts the periodic autosave. Returns a function that stops it. */
+  startAutosave(intervalMs = AUTOSAVE_INTERVAL_MS): () => void {
+    if (!this.autosaveTimer) {
+      this.autosaveTimer = setInterval(() => void this.autosave(), intervalMs)
+    }
+    return () => {
+      if (this.autosaveTimer) clearInterval(this.autosaveTimer)
+      this.autosaveTimer = null
+    }
+  }
+
+  /**
+   * One autosave pass. Each changed session is saved in its own idle slot,
+   * so typing never waits behind a large serialization.
+   */
+  async autosave(): Promise<void> {
+    if (this.autosaving) return
+    this.autosaving = true
+    try {
+      for (const session of Array.from(this.sessions.values())) {
+        if (!session.dirty) continue
+        await (this.deps.idle ?? whenIdle)()
+        if (this.sessions.get(session.id) !== session || !session.dirty) continue
+        await this.save(session)
+      }
+    } finally {
+      this.autosaving = false
+    }
+  }
+
+  /** Saves every changed session now (window hidden, app quitting). */
   async flushScrollback(): Promise<void> {
-    await Promise.all(
-      Array.from(this.sessions.values(), (session) =>
-        this.deps.api.saveScrollback(session.id, session.term.serialize()).catch(() => false)
-      )
-    )
+    const inFlight = Array.from(this.saving)
+    const saves = Array.from(this.sessions.values())
+      .filter((session) => session.dirty)
+      .map((session) => this.save(session))
+    await Promise.all([...inFlight, ...saves])
   }
 
   debugSessions(): SessionDebugInfo[] {
@@ -207,7 +264,8 @@ export class TerminalRegistry {
       visible: session.visible,
       attached: this.containers.has(session.id),
       webgl: this.deps.budget.has(session.id),
-      spawns: session.spawns
+      spawns: session.spawns,
+      dirty: session.dirty
     }))
   }
 
@@ -232,7 +290,8 @@ export class TerminalRegistry {
       started: false,
       spawns: 0,
       spawned: { cwd: panel.cwd, shell: panel.shell },
-      ptySize: { cols: 0, rows: 0 }
+      ptySize: { cols: 0, rows: 0 },
+      dirty: false
     }
     this.sessions.set(panel.id, session)
 
@@ -279,6 +338,25 @@ export class TerminalRegistry {
     }
   }
 
+  private save(session: Session): Promise<void> {
+    // Cleared before serializing: output arriving during the save marks the
+    // session again. A failed save marks it too, so the next pass retries;
+    // the dirty state is never lost on failure.
+    session.dirty = false
+    const done = (async () => {
+      let saved = false
+      try {
+        saved = await this.deps.api.saveScrollback(session.id, session.term.serialize())
+      } catch {
+        saved = false
+      }
+      if (!saved && this.sessions.get(session.id) === session) session.dirty = true
+    })()
+    this.saving.add(done)
+    void done.finally(() => this.saving.delete(done))
+    return done
+  }
+
   private hide(session: Session): void {
     if (!session.visible) return
     session.visible = false
@@ -298,7 +376,10 @@ export class TerminalRegistry {
   private ensureDataRouter(): void {
     if (this.unsubscribeData) return
     this.unsubscribeData = this.deps.api.onPtyData((id, data) => {
-      this.sessions.get(id)?.term.write(data)
+      const session = this.sessions.get(id)
+      if (!session) return
+      session.term.write(data)
+      session.dirty = true
     })
   }
 }

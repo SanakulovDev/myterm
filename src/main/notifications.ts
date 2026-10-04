@@ -49,8 +49,10 @@ export class NotificationService {
 
     notification.on('click', () => {
       const mainWindow = this.getMainWindow()
-      if (mainWindow) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
         if (mainWindow.isMinimized()) mainWindow.restore()
+        // The close button only hides the window.
+        if (!mainWindow.isVisible()) mainWindow.show()
         mainWindow.focus()
       }
       if (panelId && this.onPanelClickCallback) {

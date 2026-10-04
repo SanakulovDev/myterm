@@ -1,8 +1,10 @@
 import * as pty from 'node-pty'
+import { execFileSync } from 'child_process'
 import { randomBytes } from 'crypto'
 import { SpawnPtyOptions } from '../shared/types'
 import { buildLaunchSpawn, resolveDefaultShell, UNSUPPORTED_SHELL_BANNER } from './launch-script'
 import { LaunchMarkerParser, PtyLaunchEvent } from './launch-marker'
+import { buildTerminalEnv } from './terminal-env'
 
 // A marker split across reads completes on the very next read; anything held
 // longer than this is not a marker and is released verbatim.
@@ -12,7 +14,18 @@ interface PtyEntry {
   process: pty.IPty
   generation: number
   markerParser: LaunchMarkerParser | null
+  // Command of a launched agent that has not reported its exit yet.
+  runningAgent: string | null
 }
+
+export interface BusyPanel {
+  id: string
+  /** The launched agent, or the foreground process the kernel reports. */
+  process: string
+}
+
+/** Shell pid -> process group in the foreground of that shell's terminal. */
+export type ForegroundGroupReader = (pids: number[]) => Map<number, number>
 
 export class PtyManager {
   private ptys: Map<string, PtyEntry> = new Map()
@@ -20,15 +33,23 @@ export class PtyManager {
   private flushTimers: Map<string, NodeJS.Timeout> = new Map()
   private markerTimers: Map<string, NodeJS.Timeout> = new Map()
   private socketPath?: string
+  private appVersion = ''
   private generationCounter = 0
   private intentionallyKilledGenerations: Set<number> = new Set()
+  private readForegroundGroups: ForegroundGroupReader
 
-  constructor(socketPath?: string) {
+  constructor(socketPath?: string, readForegroundGroups = readForegroundGroupsWithPs) {
     this.socketPath = socketPath
+    this.readForegroundGroups = readForegroundGroups
   }
 
   public setSocketPath(socketPath: string): void {
     this.socketPath = socketPath
+  }
+
+  /** Reported to programs in a panel as TERM_PROGRAM_VERSION. */
+  public setAppVersion(version: string): void {
+    this.appVersion = version
   }
 
   public spawn(
@@ -47,15 +68,16 @@ export class PtyManager {
     const nonce = randomBytes(16).toString('hex')
     const plan = buildLaunchSpawn(shell, options.launch, nonce)
 
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
+    const env = buildTerminalEnv(process.env, {
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
+      TERM_PROGRAM: 'myterm',
+      ...(this.appVersion ? { TERM_PROGRAM_VERSION: this.appVersion } : {}),
       AGENT_TERMINAL_PANEL_ID: options.id,
       ...(this.socketPath ? { AGENT_TERMINAL_SOCKET: this.socketPath } : {}),
       ...(options.env || {}),
       ...plan.env
-    }
+    })
 
     try {
       const ptyProcess = pty.spawn(shell, plan.args, {
@@ -67,7 +89,13 @@ export class PtyManager {
       })
 
       const markerParser = plan.kind === 'launch' ? new LaunchMarkerParser(nonce) : null
-      this.ptys.set(options.id, { process: ptyProcess, generation, markerParser })
+      const entry: PtyEntry = {
+        process: ptyProcess,
+        generation,
+        markerParser,
+        runningAgent: plan.kind === 'launch' ? plan.command : null
+      }
+      this.ptys.set(options.id, entry)
       this.buffers.set(options.id, '')
 
       const isCurrent = (): boolean => this.ptys.get(options.id)?.generation === generation
@@ -89,6 +117,8 @@ export class PtyManager {
           this.appendOutput(options.id, result.output, onData)
         }
         if (result.event && plan.kind === 'launch') {
+          // Every marker (exit or missing) means the agent is gone.
+          entry.runningAgent = null
           onLaunchEvent?.({ ...result.event, command: plan.command })
         }
         if (markerParser.hasPending()) {
@@ -222,5 +252,77 @@ export class PtyManager {
 
   public hasPty(id: string): boolean {
     return this.ptys.has(id)
+  }
+
+  /**
+   * Panels running something besides an idle shell: a launched agent that
+   * has not exited, or any foreground job (an agent or tool started by hand).
+   *
+   * The shell leads its own process group, and job control gives every
+   * command line its own group, so "the terminal's foreground group is not
+   * the shell's" is exactly "a command is running". Process names cannot
+   * tell this: /bin/sh runs as "bash", and `bash -c` started from bash looks
+   * like the shell. An idle shell is never busy; a terminal whose foreground
+   * group cannot be read counts as idle.
+   */
+  public busyPanels(): BusyPanel[] {
+    const busy: BusyPanel[] = []
+    const shells: Array<[string, PtyEntry]> = []
+    for (const [id, entry] of this.ptys) {
+      if (entry.runningAgent) busy.push({ id, process: entry.runningAgent })
+      else shells.push([id, entry])
+    }
+    if (shells.length === 0) return busy
+
+    let groups: Map<number, number>
+    try {
+      groups = this.readForegroundGroups(shells.map(([, entry]) => entry.process.pid))
+    } catch (err) {
+      console.warn('Could not read terminal foreground process groups:', err)
+      return busy
+    }
+    for (const [id, entry] of shells) {
+      const group = groups.get(entry.process.pid)
+      if (group === undefined || group <= 0 || group === entry.process.pid) continue
+      busy.push({ id, process: foregroundProcess(entry.process) ?? 'unknown process' })
+    }
+    return busy
+  }
+}
+
+/** `ps` reports the terminal's foreground process group (tpgid) per pid. */
+function readForegroundGroupsWithPs(pids: number[]): Map<number, number> {
+  let output: string
+  try {
+    output = execFileSync('ps', ['-o', 'pid=,tpgid=', '-p', pids.join(',')], {
+      encoding: 'utf8',
+      timeout: 2000
+    })
+  } catch (err) {
+    // ps exits 1 when one of the pids is gone (a shell that just exited)
+    // but still lists the others.
+    const stdout = (err as { stdout?: unknown }).stdout
+    if (typeof stdout !== 'string' || stdout === '') throw err
+    output = stdout
+  }
+  return parseForegroundGroups(output)
+}
+
+export function parseForegroundGroups(output: string): Map<number, number> {
+  const groups = new Map<number, number>()
+  for (const line of output.split('\n')) {
+    const match = /^\s*(\d+)\s+(-?\d+)\s*$/.exec(line)
+    if (match) groups.set(Number(match[1]), Number(match[2]))
+  }
+  return groups
+}
+
+// node-pty asks the kernel for the name of the terminal's foreground process
+// group leader (tcgetpgrp + sysctl on macOS); at most 16 characters.
+function foregroundProcess(ptyProcess: pty.IPty): string | null {
+  try {
+    return ptyProcess.process || null
+  } catch {
+    return null
   }
 }

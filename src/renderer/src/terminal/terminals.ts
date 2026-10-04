@@ -5,6 +5,6 @@ import { createXtermHandle } from './xterm-handle'
 /** The app's single terminal registry (one session per open panel). */
 export const terminalRegistry = new TerminalRegistry({
   api: window.electronAPI,
-  createTerminal: createXtermHandle,
+  createTerminal: () => createXtermHandle(window.electronAPI),
   budget: new WebglBudget()
 })

@@ -18,6 +18,8 @@
   --status-error: #f85149;
   --status-exited: #6e7681;
   --danger: #da3633;
+  /* Same as the xterm theme background (terminal/xterm-handle.ts). */
+  --terminal-bg: #0d1117;
 }
 
 * {
@@ -273,7 +275,7 @@ body {
 .terminal-panel {
   display: flex;
   flex-direction: column;
-  background: #0d1117;
+  background: var(--terminal-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   overflow: hidden;
@@ -492,7 +494,7 @@ body {
   height: 100%;
   overflow: hidden;
   position: relative;
-  background: #0d1117;
+  background: var(--terminal-bg);
   padding: 4px 6px;
   min-height: 0;
   min-width: 0;
@@ -509,8 +511,11 @@ body {
   height: 100%;
 }
 
+/* xterm.css paints the viewport black. Below the last whole row it shows
+   through as a black strip; use the terminal background instead. */
 .xterm .xterm-viewport {
   overflow-y: auto;
+  background-color: var(--terminal-bg);
 }
 
 /* In-terminal search bar */

@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config'
 
-// End-to-end tests drive the built Electron app; run with `npm run test:e2e`.
+// End-to-end tests drive the test build of the app (out-e2e/, with test
+// hooks compiled in); run with `npm run test:e2e`.
 // They are not picked up by `npm test` (the default include is *.test.ts).
 export default defineConfig({
   test: {
