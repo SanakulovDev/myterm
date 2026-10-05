@@ -1,4 +1,4 @@
-import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
+import { ipcMain, dialog, shell, nativeTheme, BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { PtyManager } from './pty-manager'
@@ -9,7 +9,7 @@ import { resolveDefaultShell } from './launch-script'
 import { launchEventStatus } from './launch-marker'
 import { isSafeExternalUrl } from './external-links'
 import { AgentDetector } from './agent-detect'
-import { AppState, SpawnPtyOptions } from '../shared/types'
+import { AppState, SpawnPtyOptions, ThemeChoice, ThemeInfo } from '../shared/types'
 
 // Handlers and tracker listeners live as long as the app, not the window: a
 // second registration would throw (ipcMain.handle) or deliver every event
@@ -161,6 +161,31 @@ export function registerIpcHandlers(
   const agentDetector = new AgentDetector(() => persistenceService.loadState().agentSettings)
   ipcMain.handle('agents:detect', async (_event, refresh?: unknown) => {
     return agentDetector.detect(refresh === true)
+  })
+
+  // System Theme
+  ipcMain.handle('theme:get', (): ThemeInfo => {
+    return {
+      themeSource: nativeTheme.themeSource as ThemeChoice,
+      shouldUseDarkColors: nativeTheme.shouldUseDarkColors
+    }
+  })
+
+  ipcMain.handle('theme:set', (_event, theme: unknown): ThemeInfo => {
+    if (theme === 'system' || theme === 'dark' || theme === 'light') {
+      nativeTheme.themeSource = theme
+    }
+    return {
+      themeSource: nativeTheme.themeSource as ThemeChoice,
+      shouldUseDarkColors: nativeTheme.shouldUseDarkColors
+    }
+  })
+
+  nativeTheme.on('updated', () => {
+    send('theme:changed', {
+      themeSource: nativeTheme.themeSource as ThemeChoice,
+      shouldUseDarkColors: nativeTheme.shouldUseDarkColors
+    })
   })
 
   ipcMain.on('app:update-badge', (_event, count: number) => {

@@ -89,6 +89,10 @@ class FakeTerminal implements TerminalHandle {
       text: ''
     }
   }
+  theme: unknown = null
+  setTheme(t: unknown): void {
+    this.theme = t
+  }
   dispose(): void {
     this.disposed = true
   }
@@ -714,5 +718,32 @@ describe('TerminalRegistry sendPrompt', () => {
     registry.destroy('p1')
     vi.advanceTimersByTime(PROMPT_SUBMIT_DELAY_MS)
     expect(api.writes).toEqual([['p1', 'x']])
+  })
+
+  describe('theme switching', () => {
+    it('applies the new theme to all existing sessions without respawning PTYs', async () => {
+      mount(panel('p1'))
+      mount(panel('p2'))
+      await settle()
+
+      expect(api.spawns).toHaveLength(2)
+      const fakeTheme = { background: '#fbfcfd' } as any
+      registry.setTheme(fakeTheme)
+
+      expect(terminals.get('p1')?.theme).toBe(fakeTheme)
+      expect(terminals.get('p2')?.theme).toBe(fakeTheme)
+      // Must not have respawned PTYs
+      expect(api.spawns).toHaveLength(2)
+    })
+
+    it('new sessions created after setTheme receive the active theme', async () => {
+      const fakeTheme = { background: '#fbfcfd' } as any
+      registry.setTheme(fakeTheme)
+
+      mount(panel('p1'))
+      await settle()
+
+      expect(terminals.get('p1')?.theme).toBe(fakeTheme)
+    })
   })
 })

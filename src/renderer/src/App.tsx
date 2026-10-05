@@ -31,6 +31,9 @@ export const App: React.FC = () => {
     isSidebarVisible,
     sidebarWidth,
     collapsedWorkspaceIds,
+    theme,
+    themeLabel,
+    cycleTheme,
     refreshAgents,
     setSearchPanelId,
     setIsNewPanelModalOpen,
@@ -235,6 +238,9 @@ export const App: React.FC = () => {
                 if (wsId !== appState.activeWorkspaceId) switchWorkspace(wsId)
                 selectPanel(panelId)
               }}
+              onCycleTheme={cycleTheme}
+              theme={theme}
+              themeLabel={themeLabel}
               width={sidebarWidth}
             />
             <ResizeDivider

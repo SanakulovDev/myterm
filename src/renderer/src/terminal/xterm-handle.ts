@@ -152,6 +152,11 @@ export function createXtermHandle(app: XtermHost): TerminalHandle {
       return true
     },
 
+    setTheme(theme: import('@xterm/xterm').ITheme) {
+      term.options.theme = theme
+      term.refresh(0, term.rows - 1)
+    },
+
     refresh: () => term.refresh(0, term.rows - 1),
 
     focus: () => term.focus(),

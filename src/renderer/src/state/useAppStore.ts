@@ -1,5 +1,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { AgentKind, AppState, WorkspaceConfig, PanelConfig, PanelStatus, LayoutMode } from '../../../shared/types'
+import {
+  AgentKind,
+  AppState,
+  WorkspaceConfig,
+  PanelConfig,
+  PanelStatus,
+  LayoutMode,
+  ThemeChoice,
+  AccentChoice
+} from '../../../shared/types'
 import {
   AgentDetectionResult,
   NO_AGENT,
@@ -13,6 +22,7 @@ import {
 import { DEFAULT_UI_STATE, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from '../../../shared/layout'
 import { generatePanelName } from '../../../shared/autoname'
 import { terminalRegistry } from '../terminal/terminals'
+import { DARK_TERMINAL_THEME, LIGHT_TERMINAL_THEME } from '../terminal/terminal-themes'
 
 /** One panel of a lineup launched together (a preset). */
 export interface LineupPanel {
@@ -98,6 +108,88 @@ export function useAppStore() {
   const [isDetectingAgents, setIsDetectingAgents] = useState(false)
   const [missingPaths, setMissingPaths] = useState<Set<string>>(new Set())
 
+  const [resolvedTheme, setResolvedTheme] = useState<'dark' | 'light'>(() => {
+    return typeof document !== 'undefined' &&
+      document.documentElement.getAttribute('data-theme') === 'light'
+      ? 'light'
+      : 'dark'
+  })
+
+  // Synchronize theme with main process nativeTheme and OS appearance
+  useEffect(() => {
+    if (!window.electronAPI?.getTheme) {
+      if (typeof window !== 'undefined' && window.matchMedia) {
+        const mql = window.matchMedia('(prefers-color-scheme: dark)')
+        const handler = (e: MediaQueryListEvent | MediaQueryList): void => {
+          setResolvedTheme(e.matches ? 'dark' : 'light')
+        }
+        if (mql.addEventListener) {
+          mql.addEventListener('change', handler)
+          return (): void => mql.removeEventListener('change', handler)
+        }
+      }
+      return
+    }
+
+    // Read initial theme from Electron
+    window.electronAPI
+      .getTheme()
+      .then((info) => {
+        setResolvedTheme(info.shouldUseDarkColors ? 'dark' : 'light')
+      })
+      .catch(() => {})
+
+    // Listen to theme changes from main process (including OS appearance sync)
+    const unsub = window.electronAPI.onThemeChanged((info) => {
+      setResolvedTheme(info.shouldUseDarkColors ? 'dark' : 'light')
+      setAppState((prev) => {
+        if (!prev || prev.ui?.theme === info.themeSource) return prev
+        return {
+          ...prev,
+          ui: {
+            ...DEFAULT_UI_STATE,
+            ...prev.ui,
+            theme: info.themeSource
+          }
+        }
+      })
+    })
+    return (): void => unsub()
+  }, [])
+
+  // Sync theme when appState.ui.theme changes
+  useEffect(() => {
+    if (!appState?.ui?.theme || !window.electronAPI?.setTheme) return
+    window.electronAPI
+      .setTheme(appState.ui.theme)
+      .then((info) => {
+        setResolvedTheme(info.shouldUseDarkColors ? 'dark' : 'light')
+      })
+      .catch(() => {})
+  }, [appState?.ui?.theme])
+
+  // Apply theme attributes to document.documentElement and update terminalRegistry
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', resolvedTheme)
+    }
+    const follows = appState?.ui?.terminalFollowsTheme ?? true
+    const termTheme =
+      !follows || resolvedTheme === 'dark' ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME
+    terminalRegistry.setTheme(termTheme)
+  }, [resolvedTheme, appState?.ui?.terminalFollowsTheme])
+
+  // Apply accent attribute to document.documentElement
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const accent = appState?.ui?.accent || 'blue'
+    if (accent === 'blue') {
+      document.documentElement.removeAttribute('data-accent')
+    } else {
+      document.documentElement.setAttribute('data-accent', accent)
+    }
+  }, [appState?.ui?.accent])
+
   // Check which workspaces have missing rootPath
   useEffect(() => {
     if (!appState || !window.electronAPI?.pathsExist) return
@@ -124,10 +216,14 @@ export function useAppStore() {
 
   // Load initial state from disk
   useEffect(() => {
-    async function init() {
+    async function init(): Promise<void> {
       if (window.electronAPI) {
         const state = await window.electronAPI.loadState()
         setAppState(state)
+        if (state.ui?.theme && window.electronAPI.setTheme) {
+          const info = await window.electronAPI.setTheme(state.ui.theme)
+          setResolvedTheme(info.shouldUseDarkColors ? 'dark' : 'light')
+        }
         const activeWs = state.workspaces.find((w) => w.id === state.activeWorkspaceId)
         if (activeWs && activeWs.panels.length > 0) {
           setActivePanelId(activeWs.panels[0].id)
@@ -554,6 +650,71 @@ export function useAppStore() {
     }
   }, [activeWorkspace, panelStatuses, handleSelectPanel])
 
+  const handleCycleTheme = useCallback(() => {
+    setAppState((prev) => {
+      if (!prev) return prev
+      const currentChoice = prev.ui?.theme || 'system'
+      const nextChoice: ThemeChoice =
+        currentChoice === 'system' ? 'dark' : currentChoice === 'dark' ? 'light' : 'system'
+      window.electronAPI?.setTheme?.(nextChoice)
+      return {
+        ...prev,
+        ui: {
+          ...DEFAULT_UI_STATE,
+          ...prev.ui,
+          theme: nextChoice
+        }
+      }
+    })
+  }, [])
+
+  const handleSetTheme = useCallback((choice: ThemeChoice) => {
+    setAppState((prev) => {
+      if (!prev) return prev
+      window.electronAPI?.setTheme?.(choice)
+      return {
+        ...prev,
+        ui: {
+          ...DEFAULT_UI_STATE,
+          ...prev.ui,
+          theme: choice
+        }
+      }
+    })
+  }, [])
+
+  const handleSetAccent = useCallback((accent: AccentChoice) => {
+    setAppState((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        ui: {
+          ...DEFAULT_UI_STATE,
+          ...prev.ui,
+          accent
+        }
+      }
+    })
+  }, [])
+
+  const handleSetTerminalFollowsTheme = useCallback((follows: boolean) => {
+    setAppState((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        ui: {
+          ...DEFAULT_UI_STATE,
+          ...prev.ui,
+          terminalFollowsTheme: follows
+        }
+      }
+    })
+  }, [])
+
+  const themeChoice = appState?.ui?.theme || 'system'
+  const themeLabel =
+    themeChoice === 'system' ? 'Theme: Auto' : themeChoice === 'dark' ? 'Theme: Dark' : 'Theme: Light'
+
   return {
     appState,
     activeWorkspace,
@@ -572,6 +733,15 @@ export function useAppStore() {
     isSidebarVisible: appState?.ui?.sidebarVisible ?? true,
     sidebarWidth: appState?.ui?.sidebarWidth ?? 264,
     collapsedWorkspaceIds: appState?.ui?.collapsedWorkspaceIds ?? [],
+    theme: themeChoice,
+    resolvedTheme,
+    accent: appState?.ui?.accent || 'blue',
+    terminalFollowsTheme: appState?.ui?.terminalFollowsTheme ?? true,
+    themeLabel,
+    cycleTheme: handleCycleTheme,
+    setTheme: handleSetTheme,
+    setAccent: handleSetAccent,
+    setTerminalFollowsTheme: handleSetTerminalFollowsTheme,
     refreshAgents,
     setSearchPanelId,
     setIsNewPanelModalOpen,

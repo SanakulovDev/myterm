@@ -71,12 +71,23 @@ export interface WorkspaceConfig {
   panelOrder: string[]
 }
 
+export type ThemeChoice = 'system' | 'dark' | 'light'
+export type AccentChoice = 'blue' | 'green' | 'clay' | 'violet'
+
+export interface ThemeInfo {
+  themeSource: ThemeChoice
+  shouldUseDarkColors: boolean
+}
+
 // Window chrome that survives a restart (schema v3).
 export interface UiState {
   sidebarVisible: boolean
   sidebarWidth: number
   collapsedWorkspaceIds: string[]
   rightSlotWidth: number
+  theme?: ThemeChoice
+  accent?: AccentChoice
+  terminalFollowsTheme?: boolean
 }
 
 export interface AppState {
@@ -138,6 +149,8 @@ export interface ElectronAPI {
 
   // System
   getDefaultShell: () => Promise<string>
+  getTheme: () => Promise<ThemeInfo>
+  setTheme: (theme: ThemeChoice) => Promise<ThemeInfo>
   updateBadge: (count: number) => void
   sendNotification: (title: string, body: string, panelId?: string) => void
   notifyPanelFocus: (id: string) => void
@@ -151,6 +164,7 @@ export interface ElectronAPI {
   onPtyExit: (callback: (id: string, exitCode: number) => void) => () => void
   onAgentStatus: (callback: (id: string, status: PanelStatus, detail?: string) => void) => () => void
   onFocusPanel: (callback: (id: string) => void) => () => void
+  onThemeChanged: (callback: (info: ThemeInfo) => void) => () => void
   // Main asks the renderer to save every terminal's scrollback before the
   // window closes; it waits for the returned promise (with a timeout).
   onFlushScrollback: (callback: () => Promise<void>) => () => void

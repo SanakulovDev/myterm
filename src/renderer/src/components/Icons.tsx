@@ -153,7 +153,7 @@ export const RotateCcwIcon: React.FC<IconProps> = ({ size = 14, strokeWidth = 1.
   </svg>
 )
 
-export const SunMoonIcon: React.FC<IconProps> = ({ size = 16, strokeWidth = 1.8, ...props }) => (
+export const SunIcon: React.FC<IconProps> = ({ size = 15, strokeWidth = 1.8, ...props }) => (
   <svg {...baseProps(size, strokeWidth)} {...props}>
     <circle cx="12" cy="12" r="4" />
     <path d="M12 2v2" />
@@ -166,6 +166,28 @@ export const SunMoonIcon: React.FC<IconProps> = ({ size = 16, strokeWidth = 1.8,
     <path d="m19.07 4.93-1.41 1.41" />
   </svg>
 )
+
+export const MoonIcon: React.FC<IconProps> = ({ size = 15, strokeWidth = 1.8, ...props }) => (
+  <svg {...baseProps(size, strokeWidth)} {...props}>
+    <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+  </svg>
+)
+
+export const SunMoonIcon: React.FC<IconProps> = ({ size = 15, strokeWidth = 1.8, ...props }) => (
+  <svg {...baseProps(size, strokeWidth)} {...props}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" />
+  </svg>
+)
+
+export const ThemeModeIcon: React.FC<{ theme?: 'system' | 'dark' | 'light'; size?: number }> = ({
+  theme = 'system',
+  size = 15
+}) => {
+  if (theme === 'light') return <SunIcon size={size} />
+  if (theme === 'dark') return <MoonIcon size={size} />
+  return <SunMoonIcon size={size} />
+}
 
 export const ShellIcon: React.FC<IconProps> = ({ size = 15, strokeWidth = 1.8, ...props }) => (
   <svg {...baseProps(size, strokeWidth)} {...props}>

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, powerMonitor, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerMonitor, shell } from 'electron'
 import * as path from 'path'
 import { BusyPanel, PtyManager } from './pty-manager'
 import { AgentTracker } from './agent-tracker'
@@ -73,6 +73,7 @@ async function bootstrap(): Promise<void> {
         BrowserWindow,
         dialog,
         ipcMain,
+        nativeTheme,
         powerMonitor,
         shell,
         ptyManager,
@@ -88,6 +89,12 @@ function createWindow(): void {
   const savedState = persistenceService.loadState()
   const windowBounds = savedState.window || { width: 1280, height: 850 }
 
+  // Apply the saved theme choice before the window is shown so there is no flash.
+  const themeChoice = savedState.ui?.theme || 'system'
+  nativeTheme.themeSource = themeChoice
+  const isDark = nativeTheme.shouldUseDarkColors
+  const backgroundColor = isDark ? '#090b0e' : '#eceff3'
+
   const win = new BrowserWindow({
     width: windowBounds.width || 1280,
     height: windowBounds.height || 850,
@@ -101,7 +108,7 @@ function createWindow(): void {
     // Centred in the 36px title bar below the 12px window padding.
     trafficLightPosition: { x: 20, y: 24 },
     // The --bg token (styles/tokens.css), shown before the page paints.
-    backgroundColor: '#090b0e',
+    backgroundColor,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       sandbox: false,
