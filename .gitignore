@@ -4,3 +4,4 @@ out-e2e
 dist
 .DS_Store
 *.log
+*.tsbuildinfo

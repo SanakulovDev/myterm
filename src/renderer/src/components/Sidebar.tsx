@@ -1,186 +1,201 @@
 import React from 'react'
 import { WorkspaceConfig, PanelStatus } from '../../../shared/types'
-import { Plus, LayoutGrid, Bookmark, Layers, Bot } from 'lucide-react'
+import {
+  ChevronRightIcon,
+  ChevronDownIcon,
+  PlusIcon,
+  FolderPlusIcon,
+  WarningTriangleIcon,
+  AgentIcon,
+  SunMoonIcon,
+  SettingsIcon
+} from './Icons'
 
 interface SidebarProps {
   workspaces: WorkspaceConfig[]
   activeWorkspaceId: string
-  activeWorkspace: WorkspaceConfig | null
   activePanelId: string | null
   panelStatuses: Record<string, { status: PanelStatus; detail?: string; unread?: boolean }>
+  collapsedWorkspaceIds: string[]
+  missingPaths?: Set<string>
   onSwitchWorkspace: (id: string) => void
   onCreateWorkspace: () => void
-  onSetLayout: (rows: number, cols: number) => void
-  onSelectPanel: (id: string) => void
-  onOpenTemplates: () => void
+  onToggleCollapse: (id: string) => void
+  onSelectPanel: (panelId: string, workspaceId: string) => void
+  onCycleTheme?: () => void
+  themeLabel?: string
+  onOpenSettings?: () => void
+  width?: number
 }
-
-const LAYOUT_PRESETS = [
-  { label: '1×1', rows: 1, cols: 1 },
-  { label: '1×2', rows: 1, cols: 2 },
-  { label: '2×2', rows: 2, cols: 2 },
-  { label: '2×3', rows: 2, cols: 3 },
-  { label: '3×3', rows: 3, cols: 3 }
-]
 
 export const Sidebar: React.FC<SidebarProps> = ({
   workspaces,
   activeWorkspaceId,
-  activeWorkspace,
   activePanelId,
   panelStatuses,
+  collapsedWorkspaceIds,
+  missingPaths = new Set(),
   onSwitchWorkspace,
   onCreateWorkspace,
-  onSetLayout,
+  onToggleCollapse,
   onSelectPanel,
-  onOpenTemplates
+  onCycleTheme,
+  themeLabel = 'Theme: Auto',
+  onOpenSettings,
+  width = 264
 }) => {
   return (
-    <aside className="sidebar">
-      {/* Workspaces Section */}
-      <div className="sidebar-section">
-        <div className="sidebar-title">
-          <span>Workspaces</span>
-          <button
-            className="btn btn-sm btn-icon"
-            onClick={onCreateWorkspace}
-            title="Create new workspace"
-          >
-            <Plus size={12} />
-          </button>
-        </div>
+    <aside
+      className="sidebar-card"
+      style={{ width }}
+      aria-label="Workspaces Sidebar"
+    >
+      {/* Header Row */}
+      <div className="sidebar-header">
+        <span className="sidebar-caption">WORKSPACES</span>
+        <button
+          type="button"
+          className="sidebar-icon-btn"
+          onClick={onCreateWorkspace}
+          title="Add project"
+          aria-label="Add project"
+        >
+          <PlusIcon size={14} />
+        </button>
+      </div>
+
+      {/* Project Tree */}
+      <div className="sidebar-tree" role="tree">
         {workspaces.map((ws) => {
-          // Count unread or waiting panels in this workspace
+          const isCollapsed = collapsedWorkspaceIds.includes(ws.id)
+          const isCurrentWorkspace = ws.id === activeWorkspaceId
+          const hasMissingFolder = !ws.rootPath || missingPaths.has(ws.rootPath)
+
+          // Unread count across this workspace's panels
           const unreadCount = ws.panels.filter((p) => panelStatuses[p.id]?.unread).length
-          const waitingCount = ws.panels.filter(
-            (p) => panelStatuses[p.id]?.status === 'waiting'
-          ).length
 
           return (
-            <div
-              key={ws.id}
-              className={`workspace-item ${ws.id === activeWorkspaceId ? 'active' : ''}`}
-              data-workspace-id={ws.id}
-              onClick={() => onSwitchWorkspace(ws.id)}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                <Layers size={14} />
-                <span
-                  style={{
-                    whiteSpace: 'nowrap',
-                    textOverflow: 'ellipsis',
-                    overflow: 'hidden',
-                    maxWidth: 120
+            <div key={ws.id} className="project-group" role="treeitem" aria-expanded={!isCollapsed}>
+              {/* Project Row */}
+              <div
+                className={`project-row ${isCurrentWorkspace ? 'active active-project' : ''}`}
+                data-workspace-id={ws.id}
+                onClick={() => {
+                  onSwitchWorkspace(ws.id)
+                }}
+              >
+                <button
+                  type="button"
+                  className="project-chevron-btn"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onToggleCollapse(ws.id)
                   }}
+                  title={isCollapsed ? 'Expand project' : 'Collapse project'}
+                  aria-label={isCollapsed ? 'Expand project' : 'Collapse project'}
                 >
+                  {isCollapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}
+                </button>
+
+                <span className="project-name" title={ws.name}>
                   {ws.name}
                 </span>
+
+                {/* Warning icon if folder not found */}
+                {hasMissingFolder && (
+                  <span
+                    className="project-warning-icon"
+                    title="Project folder not found"
+                    aria-label="Project folder not found"
+                  >
+                    <WarningTriangleIcon size={14} />
+                  </span>
+                )}
+
+                {/* Unread count pill when collapsed */}
+                {isCollapsed && unreadCount > 0 && (
+                  <span className="unread-pill" title={`${unreadCount} unread panel(s)`}>
+                    {unreadCount}
+                  </span>
+                )}
               </div>
 
-              {unreadCount > 0 ? (
-                <span className="badge-count" title={`${unreadCount} panel(s) need attention`}>
-                  {unreadCount}
-                </span>
-              ) : waitingCount > 0 ? (
-                <span className="badge-count" title={`${waitingCount} panel(s) waiting`}>
-                  {waitingCount}
-                </span>
-              ) : null}
+              {/* Panel Rows (when expanded) */}
+              {!isCollapsed && (
+                <div className="project-panels-list" role="group">
+                  {ws.panels.map((panel) => {
+                    const isSelected = isCurrentWorkspace && panel.id === activePanelId
+                    const panelInfo = panelStatuses[panel.id]
+                    const status = panelInfo?.status ?? 'idle'
+                    const statusTooltip = `${status}${panelInfo?.detail ? ` · ${panelInfo.detail}` : ''}`
+
+                    return (
+                      <div
+                        key={panel.id}
+                        role="treeitem"
+                        aria-selected={isSelected}
+                        className={`panel-row ${isSelected ? 'selected' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onSelectPanel(panel.id, ws.id)
+                        }}
+                      >
+                        <span className="panel-agent-icon">
+                          <AgentIcon agent={panel.agent} size={15} />
+                        </span>
+
+                        <span className="panel-title-text" title={panel.title}>
+                          {panel.title}
+                        </span>
+
+                        <span
+                          className={`sidebar-status-dot ${status}`}
+                          title={statusTooltip}
+                          aria-label={statusTooltip}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )
         })}
       </div>
 
-      {/* Layout Presets Section */}
-      {activeWorkspace && (
-        <div className="sidebar-section">
-          <div className="sidebar-title">
-            <span>Grid Layout</span>
-            <LayoutGrid size={12} />
-          </div>
-          <div className="layout-presets">
-            {LAYOUT_PRESETS.map((preset) => {
-              const isActive =
-                activeWorkspace.layout.rows === preset.rows &&
-                activeWorkspace.layout.cols === preset.cols
-              return (
-                <button
-                  key={preset.label}
-                  className={`preset-btn ${isActive ? 'active' : ''}`}
-                  onClick={() => onSetLayout(preset.rows, preset.cols)}
-                >
-                  {preset.label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Panels in Active Workspace */}
-      {activeWorkspace && activeWorkspace.panels.length > 0 && (
-        <div className="sidebar-section">
-          <div className="sidebar-title">
-            <span>Panels ({activeWorkspace.panels.length})</span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {activeWorkspace.panels.map((p, idx) => {
-              const status = panelStatuses[p.id]?.status ?? 'idle'
-              const isUnread = panelStatuses[p.id]?.unread
-              const isSelected = activePanelId === p.id
-
-              return (
-                <div
-                  key={p.id}
-                  className={`workspace-item ${isSelected ? 'active' : ''}`}
-                  onClick={() => onSelectPanel(p.id)}
-                  style={{ padding: '4px 8px', fontSize: '12px' }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      minWidth: 0,
-                      overflow: 'hidden'
-                    }}
-                  >
-                    <span className={`status-dot ${status}`} />
-                    <span
-                      style={{
-                        whiteSpace: 'nowrap',
-                        textOverflow: 'ellipsis',
-                        overflow: 'hidden',
-                        color: isSelected ? 'var(--accent)' : 'inherit'
-                      }}
-                    >
-                      {idx + 1}. {p.title}
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    {p.agent !== 'none' && (
-                      <Bot size={11} style={{ color: 'var(--text-muted)' }} />
-                    )}
-                    {isUnread && <span className="status-dot waiting" />}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Templates Section */}
-      <div className="sidebar-section" style={{ marginTop: 'auto' }}>
+      {/* Footer */}
+      <div className="sidebar-footer">
         <button
-          className="btn"
-          style={{ width: '100%', justifyContent: 'flex-start' }}
-          onClick={onOpenTemplates}
+          type="button"
+          className="add-project-btn"
+          onClick={onCreateWorkspace}
+          title="Add project"
         >
-          <Bookmark size={13} />
-          <span>Templates</span>
+          <FolderPlusIcon size={14} />
+          <span>Add project</span>
         </button>
+
+        <div className="sidebar-footer-actions">
+          <button
+            type="button"
+            className="sidebar-footer-icon-btn"
+            onClick={onCycleTheme}
+            title={themeLabel}
+            aria-label={themeLabel}
+          >
+            <SunMoonIcon size={15} />
+          </button>
+
+          <button
+            type="button"
+            className="sidebar-footer-icon-btn"
+            onClick={onOpenSettings}
+            title="Settings"
+            aria-label="Settings"
+          >
+            <SettingsIcon size={15} />
+          </button>
+        </div>
       </div>
     </aside>
   )

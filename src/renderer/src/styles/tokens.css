@@ -1,0 +1,193 @@
+/*
+ * Design tokens. Components take every color, size, radius and font from
+ * here; nothing else in the stylesheets or components names a raw color.
+ *
+ * Dark applies by default. The light block only applies once something sets
+ * data-theme="light" on <html>, which the theme setting does from Part C4.
+ * Values marked "contrast" differ from the design file to meet 4.5:1 (text)
+ * or 3:1 (UI boundaries); tests/tokens-contrast.test.ts checks them.
+ */
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg: #090b0e;
+  --surface: #0f1217;
+  --popover: #12161d;
+  /* Same as the xterm theme background (terminal/terminal-themes.ts). */
+  --terminal-bg: #0c0f13;
+  --hover: #151a22;
+  --selected: #19202e;
+  --selected-accent-bg: #141b2b;
+  --prompt-highlight: #141922;
+  --scrim: rgba(4, 6, 9, 0.62);
+
+  /* Borders */
+  --border: #1b2029;
+  --border-subtle: #161b23;
+  --border-strong: #232a35;
+  /* contrast: inputs, checkboxes and other control outlines (3:1). */
+  --control-border: #646e7e;
+  --separator: #3a4252;
+
+  /* Text and icons */
+  --text-primary: #e6e9ef;
+  --text-secondary: #c9d1dc;
+  --text-tertiary: #aab3c0;
+  --icon-muted: #8b94a3;
+  /* contrast: #6b7585 in the design. */
+  --caption: #808a9a;
+
+  /* Accents */
+  --blue: #6ea8ff;
+  --green: #3ecf8e;
+  --clay: #d97757;
+  --violet: #b48cff;
+  --on-accent: #0a0e16;
+
+  /* Status */
+  --status-running: #3ecf8e;
+  --status-done: #3ecf8e;
+  --status-waiting: #f5b942;
+  /* contrast: #5b6472 in the design (2.7:1 on a selected row). */
+  --status-idle: #667080;
+  --status-exited: #667080;
+  --status-error: #ff6b6b;
+  --waiting-border: #6b5420;
+  --done-border: #1f4a37;
+
+  /* Diff (Part D1) */
+  --diff-add-bg: #14301f;
+  --diff-add-fg: #86e0a9;
+  --diff-remove-bg: #2a1a1f;
+  --diff-remove-fg: #ff9aa5;
+
+  /* Badges */
+  --badge-bg: #1d2a44;
+  --badge-fg: #9cc0ff;
+
+  /* Agent marks */
+  --agent-claude: #d97757;
+  --agent-codex: var(--text-primary);
+  --agent-shell: var(--icon-muted);
+
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+
+/* Applied from Part C4 (theme setting). Kept here so both modes share one
+   token list. */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #eceff3;
+  --surface: #ffffff;
+  --popover: #ffffff;
+  --terminal-bg: #fbfcfd;
+  --hover: #f2f4f7;
+  --selected: #e4ecfb;
+  --selected-accent-bg: #e6efff;
+  --prompt-highlight: #edf0f5;
+  --scrim: rgba(20, 30, 50, 0.28);
+
+  --border: #dde1e8;
+  --border-subtle: #e7eaf0;
+  --border-strong: #d3d8e0;
+  --control-border: #7a8493;
+  --separator: #c3c9d3;
+
+  --text-primary: #1a1f29;
+  --text-secondary: #323a47;
+  --text-tertiary: #454e5c;
+  --icon-muted: #596373;
+  --caption: #5f6a7a;
+
+  --blue: #2f6fe0;
+  /* contrast: #1fa86a in the design. */
+  --green: #167f50;
+  /* contrast: #c4623f in the design. */
+  --clay: #b05535;
+  --violet: #7a4fd6;
+  --on-accent: #ffffff;
+
+  --status-running: #167f50;
+  --status-done: #167f50;
+  /* contrast: #d9971a in the design. */
+  --status-waiting: #b07a12;
+  /* contrast: #9aa3b0 in the design. */
+  --status-idle: #7a8492;
+  --status-exited: #7a8492;
+  --status-error: #d23c3c;
+  --waiting-border: #dfba62;
+  --done-border: #9dd4b6;
+
+  --diff-add-bg: #e2f5e9;
+  --diff-add-fg: #17743f;
+  --diff-remove-bg: #fde9ec;
+  --diff-remove-fg: #b4232f;
+
+  --badge-bg: #dbe7fd;
+  --badge-fg: #2a58cf;
+
+  --agent-claude: #b05535;
+
+  --shadow: 0 16px 40px rgba(20, 30, 50, 0.16);
+}
+
+/* Accent color (Settings > Appearance, Part C4). Blue by default. */
+:root {
+  --accent: var(--blue);
+}
+:root[data-accent='green'] {
+  --accent: var(--green);
+}
+:root[data-accent='clay'] {
+  --accent: var(--clay);
+}
+:root[data-accent='violet'] {
+  --accent: var(--violet);
+}
+
+/* Type, sizes, radii. Shared by both modes. */
+:root {
+  --font-ui: 'Geist', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --fs-base: 13px;
+  --fs-project: 14px;
+  --fs-caption: 12px;
+  --fs-small: 11px;
+  --fs-dialog-title: 18px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --caption-tracking: 0.04em;
+
+  --radius-sidebar: 14px;
+  --radius-panel: 12px;
+  --radius-dialog: 16px;
+  --radius-popover: 12px;
+  --radius-control: 8px;
+  --radius-control-lg: 10px;
+  --radius-icon: 7px;
+  --radius-pill: 999px;
+
+  --window-padding: 12px;
+  --gap: 12px;
+  --titlebar-height: 36px;
+  --titlebar-button: 28px;
+  --sidebar-padding: 12px;
+  --row-project: 34px;
+  --row-panel: 32px;
+  --row-indent: 14px;
+  --row-menu: 34px;
+  --panel-header-height: 36px;
+  --icon-button: 26px;
+  --icon-size: 15px;
+  --status-dot: 8px;
+  --traffic-lights-width: 68px;
+
+  --focus-ring: 0 0 0 2px var(--accent);
+  --transition-fast: 120ms ease;
+}

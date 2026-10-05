@@ -1,12 +1,13 @@
-import React, { useEffect, useCallback, useRef } from 'react'
+import React, { useEffect, useCallback, useRef, useState } from 'react'
 import { useAppStore } from './state/useAppStore'
 import { WorkspaceGrid } from './components/WorkspaceGrid'
 import { Sidebar } from './components/Sidebar'
+import { TitleBar } from './components/TitleBar'
+import { LayoutPopover } from './components/LayoutPopover'
 import { NewPanelModal } from './components/NewPanelModal'
 import { TemplateModal } from './components/TemplateModal'
 import { AgentLaunchModal } from './components/AgentLaunchModal'
 import { CommandBar } from './components/CommandBar'
-import { Plus, Bell, Bookmark, Rocket } from 'lucide-react'
 
 export const App: React.FC = () => {
   const {
@@ -23,6 +24,10 @@ export const App: React.FC = () => {
     searchPanelId,
     agentDetection,
     isDetectingAgents,
+    missingPaths,
+    isSidebarVisible,
+    sidebarWidth,
+    collapsedWorkspaceIds,
     refreshAgents,
     setSearchPanelId,
     setIsNewPanelModalOpen,
@@ -31,6 +36,10 @@ export const App: React.FC = () => {
     selectPanel,
     toggleMaximize,
     setLayout,
+    setLayoutMode,
+    setLayoutGridPreset,
+    toggleSidebar,
+    toggleWorkspaceCollapse,
     addPanel,
     removePanel,
     updatePanel,
@@ -44,6 +53,7 @@ export const App: React.FC = () => {
     focusNextUnread
   } = useAppStore()
 
+  const [isLayoutPopoverOpen, setIsLayoutPopoverOpen] = useState(false)
   const commandInputRef = useRef<HTMLTextAreaElement>(null)
 
   // Calculate total unread count for header badge
@@ -174,73 +184,56 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-container">
-      {/* Title Bar */}
-      <header className="titlebar">
-        <div className="titlebar-center">
-          <span>Agent Terminal</span>
-          <span style={{ color: 'var(--text-muted)' }}>—</span>
-          <span style={{ color: 'var(--text-secondary)' }}>{activeWorkspace.name}</span>
-        </div>
+      {/* Title Bar (Section 2.1) */}
+      <TitleBar
+        projectName={activeWorkspace.name}
+        panelName={activeWorkspace.panels.find((p) => p.id === activePanelId)?.title}
+        isSidebarVisible={isSidebarVisible}
+        onToggleSidebar={toggleSidebar}
+        onToggleLayout={() => setIsLayoutPopoverOpen((v) => !v)}
+        isLayoutOpen={isLayoutPopoverOpen}
+        hasAttention={
+          totalUnread > 0 || Object.values(panelStatuses).some((s) => s.status === 'waiting')
+        }
+        onOpenNotifications={focusNextUnread}
+        onOpenSettings={() => {}}
+      />
 
-        <div className="titlebar-actions">
-          {totalUnread > 0 && (
-            <button
-              className="btn btn-sm"
-              onClick={focusNextUnread}
-              style={{ background: '#d2992226', color: '#e3b341', borderColor: 'rgba(210,153,34,0.4)' }}
-              title="Next unread panel (Cmd+U)"
-            >
-              <Bell size={12} />
-              <span>{totalUnread} waiting</span>
-            </button>
-          )}
+      {/* Layout Popover (Section 2.3) */}
+      <LayoutPopover
+        isOpen={isLayoutPopoverOpen}
+        onClose={() => setIsLayoutPopoverOpen(false)}
+        layout={activeWorkspace.layout || { mode: 'stack', rows: 1, cols: 2 }}
+        onSelectMode={(mode) => setLayoutMode(mode)}
+        onSelectPreset={(rows, cols) => {
+          setLayoutGridPreset(rows, cols)
+          setIsLayoutPopoverOpen(false)
+        }}
+      />
 
-          <button
-            className="btn btn-sm"
-            onClick={() => setIsLaunchModalOpen(true)}
-            title="Launch several agents in a new workspace"
-            data-open-launch
-          >
-            <Rocket size={12} />
-            <span>Launch</span>
-          </button>
+      {/* Main Layout Shell */}
+      <div className="main-layout-shell">
+        {/* Floating Sidebar Card (Section 2.2) */}
+        {isSidebarVisible && (
+          <Sidebar
+            workspaces={appState.workspaces}
+            activeWorkspaceId={appState.activeWorkspaceId}
+            activePanelId={activePanelId}
+            panelStatuses={panelStatuses}
+            collapsedWorkspaceIds={collapsedWorkspaceIds}
+            missingPaths={missingPaths}
+            onSwitchWorkspace={switchWorkspace}
+            onCreateWorkspace={() => createWorkspace('')}
+            onToggleCollapse={toggleWorkspaceCollapse}
+            onSelectPanel={(panelId, wsId) => {
+              if (wsId !== appState.activeWorkspaceId) switchWorkspace(wsId)
+              selectPanel(panelId)
+            }}
+            width={sidebarWidth}
+          />
+        )}
 
-          <button
-            className="btn btn-sm"
-            onClick={() => setIsTemplateModalOpen(true)}
-            title="Workspace templates"
-          >
-            <Bookmark size={12} />
-            <span>Templates</span>
-          </button>
-
-          <button
-            className="btn btn-sm btn-primary"
-            onClick={() => setIsNewPanelModalOpen(true)}
-            title="Add panel (Cmd+N)"
-            data-open-new-panel
-          >
-            <Plus size={12} />
-            <span>New Panel</span>
-          </button>
-        </div>
-      </header>
-
-      {/* Main Layout */}
-      <div className="main-layout">
-        <Sidebar
-          workspaces={appState.workspaces}
-          activeWorkspaceId={appState.activeWorkspaceId}
-          activeWorkspace={activeWorkspace}
-          activePanelId={activePanelId}
-          panelStatuses={panelStatuses}
-          onSwitchWorkspace={switchWorkspace}
-          onCreateWorkspace={() => createWorkspace('')}
-          onSetLayout={setLayout}
-          onSelectPanel={selectPanel}
-          onOpenTemplates={() => setIsTemplateModalOpen(true)}
-        />
-
+        {/* Workspace Column: Stack or Grid */}
         <div className="workspace-column">
           <WorkspaceGrid
             workspace={activeWorkspace}
@@ -267,7 +260,32 @@ export const App: React.FC = () => {
             onStartAgent={startAgentWithPrompt}
           />
         </div>
+
+        {/* Reserved right slot (Section 2.9, empty/hidden until Phase D1) */}
+        <div className="reserved-right-slot" style={{ display: 'none' }} aria-hidden="true" />
       </div>
+
+      {/* Action triggers for New Panel and Multi-Agent Lineup Launch */}
+      <button
+        type="button"
+        style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', border: 0 }}
+        data-open-new-panel
+        onClick={() => setIsNewPanelModalOpen(true)}
+        aria-hidden="true"
+        tabIndex={-1}
+      >
+        New Panel
+      </button>
+      <button
+        type="button"
+        style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', border: 0 }}
+        data-open-launch
+        onClick={() => setIsLaunchModalOpen(true)}
+        aria-hidden="true"
+        tabIndex={-1}
+      >
+        Launch
+      </button>
 
       {/* Modals */}
       <NewPanelModal

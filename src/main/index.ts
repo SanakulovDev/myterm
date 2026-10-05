@@ -8,6 +8,18 @@ import { PersistenceService } from './persistence'
 import { registerIpcHandlers } from './ipc'
 import { isSafeExternalUrl } from './external-links'
 
+// Prevent unhandled EPIPE errors when stdout/stderr pipes close
+process.stdout?.on('error', (err: any) => {
+  if (err?.code === 'EPIPE') return
+})
+process.stderr?.on('error', (err: any) => {
+  if (err?.code === 'EPIPE') return
+})
+process.on('uncaughtException', (err: any) => {
+  if (err?.code === 'EPIPE') return
+  console.error('Uncaught exception in main process:', err)
+})
+
 // Packaged builds refuse the Chromium debugging switches the end-to-end tests
 // use, before anything touches the user's data. (The Node inspector switches
 // are disabled by a fuse at package time, see scripts/after-pack.cjs.)
@@ -86,8 +98,10 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 16 },
-    backgroundColor: '#0d1117',
+    // Centred in the 36px title bar below the 12px window padding.
+    trafficLightPosition: { x: 20, y: 24 },
+    // The --bg token (styles/tokens.css), shown before the page paints.
+    backgroundColor: '#090b0e',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       sandbox: false,

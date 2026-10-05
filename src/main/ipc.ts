@@ -1,4 +1,6 @@
 import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
+import * as fs from 'fs'
+import * as path from 'path'
 import { PtyManager } from './pty-manager'
 import { AgentTracker } from './agent-tracker'
 import { NotificationService } from './notifications'
@@ -103,6 +105,22 @@ export function registerIpcHandlers(
     }
 
     return result.filePaths[0]
+  })
+
+  // Which project folders still exist (a missing one shows a warning). Only
+  // absolute paths are checked, at most 500 per call.
+  ipcMain.handle('fs:paths-exist', async (_event, paths: unknown) => {
+    if (!Array.isArray(paths)) return []
+    return Promise.all(
+      paths.slice(0, 500).map(async (p) => {
+        if (typeof p !== 'string' || !path.isAbsolute(p)) return false
+        try {
+          return (await fs.promises.stat(p)).isDirectory()
+        } catch {
+          return false
+        }
+      })
+    )
   })
 
   // Persistence

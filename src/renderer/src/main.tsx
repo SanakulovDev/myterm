@@ -5,6 +5,9 @@ import { terminalRegistry } from './terminal/terminals'
 import { TERMINAL_FONT_SIZE } from './terminal/xterm-handle'
 import '@fontsource/jetbrains-mono/400.css'
 import '@fontsource/jetbrains-mono/700.css'
+import '@fontsource/geist/400.css'
+import '@fontsource/geist/500.css'
+import '@fontsource/geist/600.css'
 import './styles/index.css'
 
 // How long the first render waits for the bundled terminal font.
@@ -38,13 +41,22 @@ function loadTerminalFont(): Promise<unknown> {
   return Promise.race([Promise.all(faces), timeout])
 }
 
+window.addEventListener('error', (e) => {
+  console.error('WINDOW UNCAUGHT ERROR:', e.error?.stack || e.message)
+})
+
 const rootElement = document.getElementById('root')
 if (rootElement) {
-  void loadTerminalFont().then(() => {
-    ReactDOM.createRoot(rootElement).render(
-      <React.StrictMode>
-        <App />
-      </React.StrictMode>
-    )
-  })
+  void loadTerminalFont()
+    .then(() => {
+      console.log('Mounting App...')
+      ReactDOM.createRoot(rootElement).render(
+        <React.StrictMode>
+          <App />
+        </React.StrictMode>
+      )
+    })
+    .catch((err) => {
+      console.error('FAILED TO MOUNT APP:', err)
+    })
 }

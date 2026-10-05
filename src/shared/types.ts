@@ -41,12 +41,34 @@ export interface PanelConfig {
   // it lives in memory and is never persisted.
 }
 
+// Stack shows the panels in one column; grid uses the preset's columns.
+export type LayoutMode = 'stack' | 'grid'
+
+export interface WorkspaceLayout {
+  mode: LayoutMode
+  // The last grid preset. Kept while in stack mode, so Grid restores it.
+  rows: number
+  cols: number
+}
+
+// A workspace is a "project" in the UI.
 export interface WorkspaceConfig {
   id: string
   name: string
-  layout: { rows: number; cols: number }
+  // The project folder (schema v3). New panels start here. Workspaces from
+  // before v3 have none.
+  rootPath?: string
+  layout: WorkspaceLayout
   panels: PanelConfig[]
   panelOrder: string[]
+}
+
+// Window chrome that survives a restart (schema v3).
+export interface UiState {
+  sidebarVisible: boolean
+  sidebarWidth: number
+  collapsedWorkspaceIds: string[]
+  rightSlotWidth: number
 }
 
 export interface AppState {
@@ -55,6 +77,7 @@ export interface AppState {
   lastUsedFolder?: string
   agentSettings: AgentSettings
   window: { x?: number; y?: number; width: number; height: number }
+  ui?: UiState
   schemaVersion: number
 }
 
@@ -87,6 +110,8 @@ export interface ElectronAPI {
 
   // Dialogs
   openDirectory: (defaultPath?: string) => Promise<string | null>
+  // Whether each path is an existing directory (same order as `paths`).
+  pathsExist: (paths: string[]) => Promise<boolean[]>
 
   // Persistence
   loadState: () => Promise<AppState>

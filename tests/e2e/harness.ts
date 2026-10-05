@@ -97,7 +97,7 @@ export class Cdp {
       if (last) return last
       await delay(100)
     }
-    throw new Error(`Timed out waiting for ${label} (last value: ${JSON.stringify(last)})`)
+    throw new Error(`Timed out waiting for ${label} (last value: ${JSON.stringify(last)})\nConsole: ${this.consoleLines.join('\n')}`)
   }
 
   close(): void {

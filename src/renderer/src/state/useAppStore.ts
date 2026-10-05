@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { AgentKind, AppState, WorkspaceConfig, PanelConfig, PanelStatus } from '../../../shared/types'
+import { AgentKind, AppState, WorkspaceConfig, PanelConfig, PanelStatus, LayoutMode } from '../../../shared/types'
 import {
   AgentDetectionResult,
   NO_AGENT,
@@ -10,6 +10,7 @@ import {
   resolveAgentArgs,
   resolveAgentCommand
 } from '../../../shared/agents'
+import { DEFAULT_UI_STATE } from '../../../shared/layout'
 import { terminalRegistry } from '../terminal/terminals'
 
 /** One panel of a lineup launched together (a preset). */
@@ -86,6 +87,31 @@ export function useAppStore() {
   const [searchPanelId, setSearchPanelId] = useState<string | null>(null)
   const [agentDetection, setAgentDetection] = useState<AgentDetectionResult | null>(null)
   const [isDetectingAgents, setIsDetectingAgents] = useState(false)
+  const [missingPaths, setMissingPaths] = useState<Set<string>>(new Set())
+
+  // Check which workspaces have missing rootPath
+  useEffect(() => {
+    if (!appState || !window.electronAPI?.pathsExist) return
+    const pathsToCheck = appState.workspaces
+      .map((w) => w.rootPath)
+      .filter((p): p is string => typeof p === 'string' && p.length > 0)
+
+    if (pathsToCheck.length === 0) {
+      setMissingPaths(new Set())
+      return
+    }
+
+    window.electronAPI
+      .pathsExist(pathsToCheck)
+      .then((existsList) => {
+        const missing = new Set<string>()
+        pathsToCheck.forEach((p, idx) => {
+          if (!existsList[idx]) missing.add(p)
+        })
+        setMissingPaths(missing)
+      })
+      .catch(() => {})
+  }, [appState?.workspaces])
 
   // Load initial state from disk
   useEffect(() => {
@@ -194,8 +220,57 @@ export function useAppStore() {
       return {
         ...prev,
         workspaces: prev.workspaces.map((ws) =>
-          ws.id === prev.activeWorkspaceId ? { ...ws, layout: { rows, cols } } : ws
+          ws.id === prev.activeWorkspaceId
+            ? { ...ws, layout: { ...ws.layout, mode: 'grid' as const, rows, cols } }
+            : ws
         )
+      }
+    })
+  }, [])
+
+  const handleSetLayoutMode = useCallback((mode: LayoutMode) => {
+    setAppState((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        workspaces: prev.workspaces.map((ws) =>
+          ws.id === prev.activeWorkspaceId
+            ? { ...ws, layout: { ...ws.layout, mode } }
+            : ws
+        )
+      }
+    })
+  }, [])
+
+  const handleToggleSidebar = useCallback(() => {
+    setAppState((prev) => {
+      if (!prev) return prev
+      const currentUi = prev.ui || DEFAULT_UI_STATE
+      return {
+        ...prev,
+        ui: {
+          ...currentUi,
+          sidebarVisible: !currentUi.sidebarVisible
+        }
+      }
+    })
+  }, [])
+
+  const handleToggleWorkspaceCollapse = useCallback((wsId: string) => {
+    setAppState((prev) => {
+      if (!prev) return prev
+      const currentUi = prev.ui || DEFAULT_UI_STATE
+      const collapsed = currentUi.collapsedWorkspaceIds || []
+      const isCollapsed = collapsed.includes(wsId)
+      const nextCollapsed = isCollapsed
+        ? collapsed.filter((id) => id !== wsId)
+        : [...collapsed, wsId]
+      return {
+        ...prev,
+        ui: {
+          ...currentUi,
+          collapsedWorkspaceIds: nextCollapsed
+        }
       }
     })
   }, [])
@@ -336,7 +411,8 @@ export function useAppStore() {
       const newWorkspace: WorkspaceConfig = {
         id: newWsId,
         name: name || `Workspace ${appState.workspaces.length + 1}`,
-        layout: { rows: 1, cols: Math.min(initialPanels.length, 3) || 1 },
+        rootPath: appState.lastUsedFolder,
+        layout: { mode: 'stack', rows: 1, cols: Math.min(initialPanels.length, 3) || 1 },
         panels: initialPanels,
         panelOrder: initialPanels.map((p) => p.id)
       }
@@ -376,7 +452,8 @@ export function useAppStore() {
       const newWorkspace: WorkspaceConfig = {
         id: `ws-${Date.now()}`,
         name: name.trim() || `Workspace ${appState.workspaces.length + 1}`,
-        layout: layoutForCount(panels.length),
+        rootPath: cwd || appState.lastUsedFolder,
+        layout: { mode: 'stack', ...layoutForCount(panels.length) },
         panels,
         panelOrder: panels.map((p) => p.id)
       }
@@ -454,6 +531,10 @@ export function useAppStore() {
     searchPanelId,
     agentDetection,
     isDetectingAgents,
+    missingPaths,
+    isSidebarVisible: appState?.ui?.sidebarVisible ?? true,
+    sidebarWidth: appState?.ui?.sidebarWidth ?? 264,
+    collapsedWorkspaceIds: appState?.ui?.collapsedWorkspaceIds ?? [],
     refreshAgents,
     setSearchPanelId,
     setIsNewPanelModalOpen,
@@ -462,6 +543,10 @@ export function useAppStore() {
     selectPanel: handleSelectPanel,
     toggleMaximize: handleToggleMaximize,
     setLayout: handleSetLayout,
+    setLayoutMode: handleSetLayoutMode,
+    setLayoutGridPreset: handleSetLayout,
+    toggleSidebar: handleToggleSidebar,
+    toggleWorkspaceCollapse: handleToggleWorkspaceCollapse,
     addPanel: handleAddPanel,
     removePanel: handleRemovePanel,
     updatePanel: handleUpdatePanel,

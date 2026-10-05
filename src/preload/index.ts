@@ -8,6 +8,7 @@ const api: ElectronAPI = {
   killPty: (id: string) => ipcRenderer.send('pty:kill', id),
 
   openDirectory: (defaultPath?: string) => ipcRenderer.invoke('dialog:open-directory', defaultPath),
+  pathsExist: (paths: string[]) => ipcRenderer.invoke('fs:paths-exist', paths),
 
   loadState: () => ipcRenderer.invoke('state:load'),
   saveState: (state: AppState) => ipcRenderer.invoke('state:save', state),
