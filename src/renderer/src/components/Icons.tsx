@@ -119,6 +119,27 @@ export const CloseIcon: React.FC<IconProps> = ({ size = 16, strokeWidth = 1.8, .
   </svg>
 )
 
+export const EditIcon: React.FC<IconProps> = ({ size = 15, strokeWidth = 1.8, ...props }) => (
+  <svg {...baseProps(size, strokeWidth)} {...props}>
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+  </svg>
+)
+
+export const WandIcon: React.FC<IconProps> = ({ size = 15, strokeWidth = 1.8, ...props }) => (
+  <svg {...baseProps(size, strokeWidth)} {...props}>
+    <path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z" />
+    <path d="m14 7 3 3" />
+    <path d="M5 6v4" />
+    <path d="M19 14v4" />
+    <path d="M10 2v2" />
+    <path d="M7 8H3" />
+    <path d="M21 16h-4" />
+    <path d="M11 3H9" />
+  </svg>
+)
+
+
 export const PlayIcon: React.FC<IconProps> = ({ size = 14, strokeWidth = 1.8, ...props }) => (
   <svg {...baseProps(size, strokeWidth)} {...props}>
     <polygon points="5 3 19 12 5 21 5 3" />
