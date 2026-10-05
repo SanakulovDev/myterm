@@ -34,7 +34,8 @@ export const WorkspaceGrid: React.FC<WorkspaceGridProps> = ({
   onRestartAgent,
   onToggleSearch,
   onAddNewPanel,
-  onOpenPanelMenu
+  onOpenPanelMenu,
+  onUpdatePanel
 }) => {
   const { layout = { mode: 'stack', rows: 1, cols: 2 }, panels, name } = workspace
 
@@ -115,6 +116,7 @@ export const WorkspaceGrid: React.FC<WorkspaceGridProps> = ({
                 onAddPanel={onAddNewPanel}
                 onOpenMenu={onOpenPanelMenu ? (e) => onOpenPanelMenu(panel.id, e) : undefined}
                 onToggleSearch={() => onToggleSearch(panel.id)}
+                onUpdate={onUpdatePanel ? (updates) => onUpdatePanel(panel.id, updates) : undefined}
               />
             </div>
           )

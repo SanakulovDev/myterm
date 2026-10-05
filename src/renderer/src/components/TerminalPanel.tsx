@@ -42,7 +42,8 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
   onClose,
   onAddPanel,
   onOpenMenu,
-  onToggleSearch
+  onToggleSearch,
+  onUpdate
 }) => {
   const slotRef = useRef<HTMLDivElement>(null)
   const [searchText, setSearchText] = useState('')
@@ -123,6 +124,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
         onClose={onClose}
         onLaunchAgent={onLaunchAgent}
         onRestartAgent={onRestartAgent}
+        onUpdatePanel={onUpdate}
       />
 
       <div className="terminal-body-container">

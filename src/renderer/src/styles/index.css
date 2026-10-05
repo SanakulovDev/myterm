@@ -726,6 +726,162 @@ body {
   background: var(--status-done);
 }
 
+/* Section 2.6: Inline Rename */
+.inline-rename-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inline-rename-input {
+  width: 240px;
+  max-width: 100%;
+  height: 24px;
+  background: var(--surface);
+  color: var(--text-primary);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-button);
+  padding: 0 8px;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-medium);
+  font-family: inherit;
+  outline: none;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.inline-rename-hint {
+  font-size: 11px;
+  color: var(--caption);
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* Section 2.5: Panel Menu Popover (244px wide) */
+.panel-menu-popover {
+  position: fixed;
+  width: 244px;
+  background: var(--popover);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-popover);
+  box-shadow: var(--shadow);
+  padding: 4px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  user-select: none;
+}
+
+.panel-menu-popover .menu-item {
+  height: 32px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-button);
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-normal);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.panel-menu-popover .menu-item:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.panel-menu-popover .menu-item:focus-visible {
+  outline: none;
+  background: var(--hover);
+  box-shadow: var(--focus-ring);
+}
+
+.panel-menu-popover .menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.panel-menu-popover .menu-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--icon-muted);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.panel-menu-popover .menu-item-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel-menu-popover .menu-item-danger {
+  color: var(--status-error);
+}
+
+.panel-menu-popover .menu-item-danger .menu-item-icon {
+  color: var(--status-error);
+}
+
+.panel-menu-popover .menu-item-danger:hover:not(:disabled) {
+  background: var(--diff-remove-bg);
+  color: var(--status-error);
+}
+
+.panel-menu-popover .menu-separator {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 4px 0;
+}
+
+.panel-menu-popover .menu-item-toggle {
+  justify-content: space-between;
+}
+
+.panel-menu-popover .menu-item-toggle .menu-item-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-menu-popover .switch-toggle {
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--border-strong);
+  position: relative;
+  transition: background var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.panel-menu-popover .switch-toggle.active {
+  background: var(--accent);
+}
+
+.panel-menu-popover .switch-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--on-accent);
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform var(--transition-fast);
+}
+
+.panel-menu-popover .switch-toggle.active .switch-thumb {
+  transform: translateX(12px);
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { AgentKind, AppState, WorkspaceConfig, PanelConfig, PanelStatus, LayoutMode } from '../../../shared/types'
 import {
   AgentDetectionResult,
@@ -11,6 +11,7 @@ import {
   resolveAgentCommand
 } from '../../../shared/agents'
 import { DEFAULT_UI_STATE } from '../../../shared/layout'
+import { generatePanelName } from '../../../shared/autoname'
 import { terminalRegistry } from '../terminal/terminals'
 
 /** One panel of a lineup launched together (a preset). */
@@ -56,6 +57,13 @@ function buildPanel(
           ? resolveAgentArgs(agent, state.agentSettings)
           : '') || undefined
     : undefined
+  const hasManualTitle = Boolean(config.title?.trim())
+  const autoName =
+    config.autoName !== undefined
+      ? config.autoName
+      : hasManualTitle
+        ? false
+        : isAgent
   return {
     id,
     title: config.title?.trim() || agentLabel({ agent, agentCommand }),
@@ -63,7 +71,8 @@ function buildPanel(
     agent,
     agentCommand,
     agentArgs,
-    shell: config.shell || defaultShell
+    shell: config.shell || defaultShell,
+    autoName
   }
 }
 

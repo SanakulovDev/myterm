@@ -37,6 +37,8 @@ export interface PanelConfig {
   agentArgs?: string // extra arguments e.g. "--verbose"
   shell: string // default: user's login shell
   env?: Record<string, string>
+  // Whether auto-naming is active for this panel (default true for agents).
+  autoName?: boolean
   // Runtime-only state (status, unread) is deliberately NOT part of PanelConfig:
   // it lives in memory and is never persisted.
 }
