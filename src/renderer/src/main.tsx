@@ -47,9 +47,18 @@ window.addEventListener('error', (e) => {
 
 const rootElement = document.getElementById('root')
 if (rootElement) {
-  void loadTerminalFont()
+  void Promise.all([
+    loadTerminalFont(),
+    window.electronAPI?.getTheme?.()
+      .then((info) => {
+        document.documentElement.setAttribute(
+          'data-theme',
+          info.shouldUseDarkColors ? 'dark' : 'light'
+        )
+      })
+      .catch(() => {})
+  ])
     .then(() => {
-      console.log('Mounting App...')
       ReactDOM.createRoot(rootElement).render(
         <React.StrictMode>
           <App />

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { ElectronAPI, SpawnPtyOptions, AppState, PanelStatus } from '../shared/types'
+import { ElectronAPI, SpawnPtyOptions, AppState, PanelStatus, ThemeChoice, ThemeInfo } from '../shared/types'
 
 const api: ElectronAPI = {
   spawnPty: (options: SpawnPtyOptions) => ipcRenderer.invoke('pty:spawn', options),
@@ -18,6 +18,8 @@ const api: ElectronAPI = {
   deleteScrollback: (panelId: string) => ipcRenderer.invoke('state:delete-scrollback', panelId),
 
   getDefaultShell: () => ipcRenderer.invoke('shell:get-default'),
+  getTheme: () => ipcRenderer.invoke('theme:get'),
+  setTheme: (theme: ThemeChoice) => ipcRenderer.invoke('theme:set', theme),
   detectAgents: (refresh?: boolean) => ipcRenderer.invoke('agents:detect', refresh === true),
   isPtyBusy: (id: string) => ipcRenderer.invoke('pty:is-busy', id),
   updateBadge: (count: number) => ipcRenderer.send('app:update-badge', count),
@@ -57,6 +59,14 @@ const api: ElectronAPI = {
     ipcRenderer.on('notification:focus-panel', handler)
     return (): void => {
       ipcRenderer.removeListener('notification:focus-panel', handler)
+    }
+  },
+
+  onThemeChanged: (callback: (info: ThemeInfo) => void) => {
+    const handler = (_event: unknown, info: ThemeInfo): void => callback(info)
+    ipcRenderer.on('theme:changed', handler)
+    return (): void => {
+      ipcRenderer.removeListener('theme:changed', handler)
     }
   },
 

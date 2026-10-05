@@ -1,5 +1,5 @@
 import React from 'react'
-import { WorkspaceConfig, PanelStatus } from '../../../shared/types'
+import { WorkspaceConfig, PanelStatus, ThemeChoice } from '../../../shared/types'
 import {
   ChevronRightIcon,
   ChevronDownIcon,
@@ -7,7 +7,7 @@ import {
   FolderPlusIcon,
   WarningTriangleIcon,
   AgentIcon,
-  SunMoonIcon,
+  ThemeModeIcon,
   SettingsIcon
 } from './Icons'
 
@@ -23,6 +23,7 @@ interface SidebarProps {
   onToggleCollapse: (id: string) => void
   onSelectPanel: (panelId: string, workspaceId: string) => void
   onCycleTheme?: () => void
+  theme?: ThemeChoice
   themeLabel?: string
   onOpenSettings?: () => void
   width?: number
@@ -40,6 +41,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   onSelectPanel,
   onCycleTheme,
+  theme = 'system',
   themeLabel = 'Theme: Auto',
   onOpenSettings,
   width = 264
@@ -183,7 +185,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             title={themeLabel}
             aria-label={themeLabel}
           >
-            <SunMoonIcon size={15} />
+            <ThemeModeIcon theme={theme} size={15} />
           </button>
 
           <button

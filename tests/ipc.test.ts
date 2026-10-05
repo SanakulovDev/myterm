@@ -23,7 +23,12 @@ vi.mock('electron', () => ({
   },
   dialog: {},
   app: { getPath: () => '/tmp' },
-  Notification: { isSupported: () => false }
+  Notification: { isSupported: () => false },
+  nativeTheme: {
+    themeSource: 'system',
+    shouldUseDarkColors: true,
+    on: (_event: string, _callback: () => void) => {}
+  }
 }))
 
 import { registerIpcHandlers } from '../src/main/ipc'

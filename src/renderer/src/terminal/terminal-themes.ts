@@ -2,7 +2,6 @@ import type { ITheme } from '@xterm/xterm'
 
 // One xterm theme per app theme. The background matches the --terminal-bg
 // token (styles/tokens.css) so the area below the last row blends in.
-// The light theme arrives with the theme switch (Part C4).
 export const DARK_TERMINAL_THEME: ITheme = {
   background: '#0c0f13',
   foreground: '#c9d1dc',
@@ -26,3 +25,29 @@ export const DARK_TERMINAL_THEME: ITheme = {
   brightCyan: '#56d4dd',
   brightWhite: '#f0f6fc'
 }
+
+export const LIGHT_TERMINAL_THEME: ITheme = {
+  background: '#fbfcfd',
+  foreground: '#1a1f29',
+  cursor: '#2f6fe0',
+  cursorAccent: '#fbfcfd',
+  selectionBackground: 'rgba(47, 111, 224, 0.2)',
+  selectionInactiveBackground: 'rgba(47, 111, 224, 0.12)',
+  black: '#1a1f29',
+  red: '#cf222e',
+  green: '#116329',
+  yellow: '#855b00',
+  blue: '#0969da',
+  magenta: '#8250df',
+  cyan: '#1b7c83',
+  white: '#57606a',
+  brightBlack: '#4c5561',
+  brightRed: '#a40e26',
+  brightGreen: '#1a7f37',
+  brightYellow: '#7a4e00',
+  brightBlue: '#1a68d1',
+  brightMagenta: '#703bbb',
+  brightCyan: '#136b72',
+  brightWhite: '#24292f'
+}
+

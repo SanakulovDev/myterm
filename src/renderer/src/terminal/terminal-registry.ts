@@ -2,6 +2,8 @@ import { ElectronAPI, LaunchSpec, PanelConfig } from '../../../shared/types'
 import { NO_AGENT, promptFlag } from '../../../shared/agents'
 import { Disposable, WebglBudget } from './webgl-budget'
 import { whenIdle } from './idle'
+import type { ITheme } from '@xterm/xterm'
+import { DARK_TERMINAL_THEME } from './terminal-themes'
 
 // Terminal sessions live outside React. A panel's session (xterm, addons, host
 // element) is created the first time the panel is shown and destroyed only when
@@ -41,6 +43,8 @@ export interface TerminalHandle {
   serialize(): string
   findNext(text: string): boolean
   findPrevious(text: string): boolean
+  /** Sets the xterm theme dynamically. */
+  setTheme?(theme: ITheme): void
   /** Loads a WebGL renderer, or returns null when WebGL is unavailable. */
   attachWebgl(onContextLoss: () => void): Disposable | null
   debugInfo(): TerminalDebugInfo
@@ -130,8 +134,21 @@ export class TerminalRegistry {
   private autosaving = false
   // Scrollback saves still in flight; a flush waits for them too.
   private readonly saving = new Set<Promise<void>>()
+  private currentTheme: ITheme = DARK_TERMINAL_THEME
 
   constructor(private readonly deps: TerminalRegistryDeps) {}
+
+  /** Sets the theme for all active and parked terminal sessions. */
+  setTheme(theme: ITheme): void {
+    this.currentTheme = theme
+    for (const session of this.sessions.values()) {
+      session.term.setTheme?.(theme)
+    }
+  }
+
+  getTheme(): ITheme {
+    return this.currentTheme
+  }
 
   markLaunchPending(id: string, prompt?: string): void {
     this.pendingLaunch.set(id, prompt)
@@ -323,6 +340,7 @@ export class TerminalRegistry {
   private create(panel: PanelConfig, container: HTMLElement): Session {
     this.ensureDataRouter()
     const term = this.deps.createTerminal()
+    term.setTheme?.(this.currentTheme)
     const session: Session = {
       id: panel.id,
       term,

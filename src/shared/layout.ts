@@ -4,7 +4,10 @@ export const DEFAULT_UI_STATE: UiState = {
   sidebarVisible: true,
   sidebarWidth: 264,
   collapsedWorkspaceIds: [],
-  rightSlotWidth: 360
+  rightSlotWidth: 360,
+  theme: 'system',
+  accent: 'blue',
+  terminalFollowsTheme: true
 }
 
 export const SIDEBAR_MIN_WIDTH = 200
