@@ -51,6 +51,12 @@ export interface WorkspaceLayout {
   // The last grid preset. Kept while in stack mode, so Grid restores it.
   rows: number
   cols: number
+  // Fractions per row in stack mode (sum to 1).
+  stackRowSizes?: number[]
+  // Fractions per row in grid mode (sum to 1).
+  gridRowSizes?: number[]
+  // Fractions per column in grid mode (sum to 1).
+  gridColSizes?: number[]
 }
 
 // A workspace is a "project" in the UI.

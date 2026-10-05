@@ -67,16 +67,29 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
     const slot = slotRef.current
     if (!slot) return
 
-    let resizeTimer: ReturnType<typeof setTimeout> | null = null
+    let lastFitTime = 0
+    let trailingTimer: ReturnType<typeof setTimeout> | null = null
     const ro = new ResizeObserver(() => {
-      if (resizeTimer) clearTimeout(resizeTimer)
-      resizeTimer = setTimeout(() => terminalRegistry.fit(panel.id), 50)
+      const now = Date.now()
+      const remaining = 100 - (now - lastFitTime)
+      if (remaining <= 0) {
+        if (trailingTimer) clearTimeout(trailingTimer)
+        trailingTimer = null
+        lastFitTime = now
+        terminalRegistry.fit(panel.id)
+      } else if (!trailingTimer) {
+        trailingTimer = setTimeout(() => {
+          lastFitTime = Date.now()
+          trailingTimer = null
+          terminalRegistry.fit(panel.id)
+        }, remaining)
+      }
     })
     ro.observe(slot)
 
     return () => {
       ro.disconnect()
-      if (resizeTimer) clearTimeout(resizeTimer)
+      if (trailingTimer) clearTimeout(trailingTimer)
     }
   }, [panel.id])
 

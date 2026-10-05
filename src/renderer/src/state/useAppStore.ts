@@ -10,7 +10,7 @@ import {
   resolveAgentArgs,
   resolveAgentCommand
 } from '../../../shared/agents'
-import { DEFAULT_UI_STATE } from '../../../shared/layout'
+import { DEFAULT_UI_STATE, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from '../../../shared/layout'
 import { generatePanelName } from '../../../shared/autoname'
 import { terminalRegistry } from '../terminal/terminals'
 
@@ -247,6 +247,34 @@ export function useAppStore() {
             ? { ...ws, layout: { ...ws.layout, mode } }
             : ws
         )
+      }
+    })
+  }, [])
+
+  const handleUpdateLayout = useCallback((layoutUpdates: Partial<WorkspaceLayout>) => {
+    setAppState((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        workspaces: prev.workspaces.map((ws) =>
+          ws.id === prev.activeWorkspaceId
+            ? { ...ws, layout: { ...ws.layout, ...layoutUpdates } }
+            : ws
+        )
+      }
+    })
+  }, [])
+
+  const handleSetSidebarWidth = useCallback((width: number) => {
+    setAppState((prev) => {
+      if (!prev) return prev
+      const currentUi = prev.ui || DEFAULT_UI_STATE
+      return {
+        ...prev,
+        ui: {
+          ...currentUi,
+          sidebarWidth: Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, width))
+        }
       }
     })
   }, [])
@@ -554,6 +582,8 @@ export function useAppStore() {
     setLayout: handleSetLayout,
     setLayoutMode: handleSetLayoutMode,
     setLayoutGridPreset: handleSetLayout,
+    updateLayout: handleUpdateLayout,
+    setSidebarWidth: handleSetSidebarWidth,
     toggleSidebar: handleToggleSidebar,
     toggleWorkspaceCollapse: handleToggleWorkspaceCollapse,
     addPanel: handleAddPanel,

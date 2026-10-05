@@ -260,9 +260,94 @@ body {
   display: flex;
   flex: 1;
   min-height: 0;
-  gap: var(--gap);
+  gap: 0;
   width: 100%;
   overflow: hidden;
+}
+
+/* Section 3.1: Resize Dividers */
+body.is-resizing {
+  user-select: none !important;
+  cursor: inherit !important;
+}
+
+body.is-resizing * {
+  user-select: none !important;
+  pointer-events: none !important;
+}
+
+body.is-resizing .resize-divider,
+body.is-resizing .resize-divider * {
+  pointer-events: auto !important;
+}
+
+.resize-divider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  outline: none;
+  z-index: 10;
+  touch-action: none;
+  user-select: none;
+  background: transparent;
+}
+
+.resize-divider:focus-visible .resize-grip {
+  background: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.resize-divider-horizontal {
+  width: 100%;
+  height: 12px;
+  cursor: row-resize;
+}
+
+.resize-divider-vertical {
+  width: 12px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.resize-grip {
+  background: var(--border-strong);
+  border-radius: 3px;
+  transition: background var(--transition-fast);
+  pointer-events: none;
+}
+
+.resize-divider-horizontal .resize-grip {
+  width: 48px;
+  height: 6px;
+}
+
+.resize-divider-vertical .resize-grip {
+  width: 6px;
+  height: 48px;
+}
+
+.resize-divider:hover .resize-grip,
+.resize-divider.is-dragging .resize-grip {
+  background: var(--accent);
+}
+
+.resize-drag-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--popover);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  font-size: 11px;
+  padding: 4px 8px;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1000;
 }
 
 /* Section 2.2: Floating Sidebar Card */

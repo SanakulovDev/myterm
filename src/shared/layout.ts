@@ -9,6 +9,9 @@ export const DEFAULT_UI_STATE: UiState = {
 
 export const SIDEBAR_MIN_WIDTH = 200
 export const SIDEBAR_MAX_WIDTH = 400
+export const PANEL_MIN_WIDTH = 240
+export const PANEL_MIN_HEIGHT = 120
+export const DIVIDER_SIZE = 12
 
 /** The grid presets of the Layout popover, as rows x columns. */
 export const GRID_PRESETS: readonly { rows: number; cols: number }[] = [
@@ -20,6 +23,47 @@ export const GRID_PRESETS: readonly { rows: number; cols: number }[] = [
 ]
 
 export const DEFAULT_LAYOUT: WorkspaceLayout = { mode: 'stack', rows: 1, cols: 2 }
+
+export function getOrInitFractions(fractions: number[] | undefined, count: number): number[] {
+  if (count <= 0) return []
+  if (
+    fractions &&
+    fractions.length === count &&
+    Math.abs(fractions.reduce((sum, v) => sum + v, 0) - 1) < 0.05
+  ) {
+    return fractions
+  }
+  return Array(count).fill(1 / count)
+}
+
+export function adjustFractions(
+  sizes: number[],
+  index: number,
+  deltaPx: number,
+  totalPx: number,
+  minPx: number
+): number[] {
+  if (sizes.length < 2 || index < 0 || index >= sizes.length - 1 || totalPx <= 0) {
+    return sizes
+  }
+  const deltaFraction = deltaPx / totalPx
+  const minFraction = minPx / totalPx
+
+  const currentA = sizes[index]
+  const currentB = sizes[index + 1]
+
+  let clampedDelta = deltaFraction
+  if (currentA + clampedDelta < minFraction) {
+    clampedDelta = minFraction - currentA
+  } else if (currentB - clampedDelta < minFraction) {
+    clampedDelta = currentB - minFraction
+  }
+
+  const next = [...sizes]
+  next[index] = currentA + clampedDelta
+  next[index + 1] = currentB - clampedDelta
+  return next
+}
 
 /** Where one panel sits: 1-based CSS grid lines. */
 export interface CellPlacement {
