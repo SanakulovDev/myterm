@@ -8,6 +8,9 @@ import { NewPanelModal } from './components/NewPanelModal'
 import { TemplateModal } from './components/TemplateModal'
 import { AgentLaunchModal } from './components/AgentLaunchModal'
 import { CommandBar } from './components/CommandBar'
+import { ResizeDivider } from './components/ResizeDivider'
+import { DEFAULT_UI_STATE } from '../../shared/layout'
+import { terminalRegistry } from './terminal/terminals'
 
 export const App: React.FC = () => {
   const {
@@ -35,9 +38,11 @@ export const App: React.FC = () => {
     setIsLaunchModalOpen,
     selectPanel,
     toggleMaximize,
-    setLayout,
+    setLayout: _setLayout,
     setLayoutMode,
     setLayoutGridPreset,
+    updateLayout,
+    setSidebarWidth,
     toggleSidebar,
     toggleWorkspaceCollapse,
     addPanel,
@@ -215,22 +220,31 @@ export const App: React.FC = () => {
       <div className="main-layout-shell">
         {/* Floating Sidebar Card (Section 2.2) */}
         {isSidebarVisible && (
-          <Sidebar
-            workspaces={appState.workspaces}
-            activeWorkspaceId={appState.activeWorkspaceId}
-            activePanelId={activePanelId}
-            panelStatuses={panelStatuses}
-            collapsedWorkspaceIds={collapsedWorkspaceIds}
-            missingPaths={missingPaths}
-            onSwitchWorkspace={switchWorkspace}
-            onCreateWorkspace={() => createWorkspace('')}
-            onToggleCollapse={toggleWorkspaceCollapse}
-            onSelectPanel={(panelId, wsId) => {
-              if (wsId !== appState.activeWorkspaceId) switchWorkspace(wsId)
-              selectPanel(panelId)
-            }}
-            width={sidebarWidth}
-          />
+          <>
+            <Sidebar
+              workspaces={appState.workspaces}
+              activeWorkspaceId={appState.activeWorkspaceId}
+              activePanelId={activePanelId}
+              panelStatuses={panelStatuses}
+              collapsedWorkspaceIds={collapsedWorkspaceIds}
+              missingPaths={missingPaths}
+              onSwitchWorkspace={switchWorkspace}
+              onCreateWorkspace={() => createWorkspace('')}
+              onToggleCollapse={toggleWorkspaceCollapse}
+              onSelectPanel={(panelId, wsId) => {
+                if (wsId !== appState.activeWorkspaceId) switchWorkspace(wsId)
+                selectPanel(panelId)
+              }}
+              width={sidebarWidth}
+            />
+            <ResizeDivider
+              orientation="vertical"
+              onResize={(deltaPx) => setSidebarWidth(sidebarWidth + deltaPx)}
+              onResizeEnd={() => terminalRegistry.fitAll()}
+              onReset={() => setSidebarWidth(DEFAULT_UI_STATE.sidebarWidth)}
+              label="Resize sidebar"
+            />
+          </>
         )}
 
         {/* Workspace Column: Stack or Grid */}
@@ -249,6 +263,7 @@ export const App: React.FC = () => {
             onToggleSearch={(id) => setSearchPanelId((curr) => (curr === id ? null : id))}
             onUpdatePanel={updatePanel}
             onAddNewPanel={() => setIsNewPanelModalOpen(true)}
+            onUpdateLayout={updateLayout}
           />
           <CommandBar
             workspace={activeWorkspace}

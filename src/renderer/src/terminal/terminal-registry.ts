@@ -187,6 +187,13 @@ export class TerminalRegistry {
     if (session?.visible) this.refit(session)
   }
 
+  /** Refits all visible panels to their containers. */
+  fitAll(): void {
+    for (const session of this.sessions.values()) {
+      if (session.visible) this.refit(session)
+    }
+  }
+
   focus(id: string): void {
     const session = this.sessions.get(id)
     if (session?.visible) session.term.focus()
