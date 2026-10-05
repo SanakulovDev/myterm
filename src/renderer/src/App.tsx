@@ -1,10 +1,13 @@
-import React, { useEffect, useCallback } from 'react'
+import React, { useEffect, useCallback, useRef, useState } from 'react'
 import { useAppStore } from './state/useAppStore'
 import { WorkspaceGrid } from './components/WorkspaceGrid'
 import { Sidebar } from './components/Sidebar'
+import { TitleBar } from './components/TitleBar'
+import { LayoutPopover } from './components/LayoutPopover'
 import { NewPanelModal } from './components/NewPanelModal'
 import { TemplateModal } from './components/TemplateModal'
-import { Plus, Bell, Bookmark } from 'lucide-react'
+import { AgentLaunchModal } from './components/AgentLaunchModal'
+import { CommandBar } from './components/CommandBar'
 
 export const App: React.FC = () => {
   const {
@@ -17,22 +20,41 @@ export const App: React.FC = () => {
     lastUsedFolder,
     isNewPanelModalOpen,
     isTemplateModalOpen,
+    isLaunchModalOpen,
     searchPanelId,
+    agentDetection,
+    isDetectingAgents,
+    missingPaths,
+    isSidebarVisible,
+    sidebarWidth,
+    collapsedWorkspaceIds,
+    refreshAgents,
     setSearchPanelId,
     setIsNewPanelModalOpen,
     setIsTemplateModalOpen,
+    setIsLaunchModalOpen,
     selectPanel,
     toggleMaximize,
     setLayout,
+    setLayoutMode,
+    setLayoutGridPreset,
+    toggleSidebar,
+    toggleWorkspaceCollapse,
     addPanel,
     removePanel,
     updatePanel,
     switchWorkspace,
     createWorkspace,
+    launchLineup,
+    sendPrompt,
+    startAgentWithPrompt,
     launchAgent,
     restartAgent,
     focusNextUnread
   } = useAppStore()
+
+  const [isLayoutPopoverOpen, setIsLayoutPopoverOpen] = useState(false)
+  const commandInputRef = useRef<HTMLTextAreaElement>(null)
 
   // Calculate total unread count for header badge
   const totalUnread = activeWorkspace
@@ -47,6 +69,14 @@ export const App: React.FC = () => {
       if (isCmd && !e.shiftKey && !e.altKey && e.key === 'n') {
         e.preventDefault()
         setIsNewPanelModalOpen(true)
+        return
+      }
+
+      // Focus the command bar. Inside a terminal xterm.js takes Ctrl+L (clear
+      // screen) itself, so only Cmd+L reaches this there.
+      if (isCmd && !e.shiftKey && !e.altKey && e.key === 'l') {
+        e.preventDefault()
+        commandInputRef.current?.focus()
         return
       }
 
@@ -150,93 +180,132 @@ export const App: React.FC = () => {
     )
   }
 
+  const activePanelCwd = activeWorkspace.panels.find((p) => p.id === activePanelId)?.cwd || '/'
+
   return (
     <div className="app-container">
-      {/* Title Bar */}
-      <header className="titlebar">
-        <div className="titlebar-center">
-          <span>Agent Terminal</span>
-          <span style={{ color: 'var(--text-muted)' }}>—</span>
-          <span style={{ color: 'var(--text-secondary)' }}>{activeWorkspace.name}</span>
+      {/* Title Bar (Section 2.1) */}
+      <TitleBar
+        projectName={activeWorkspace.name}
+        panelName={activeWorkspace.panels.find((p) => p.id === activePanelId)?.title}
+        isSidebarVisible={isSidebarVisible}
+        onToggleSidebar={toggleSidebar}
+        onToggleLayout={() => setIsLayoutPopoverOpen((v) => !v)}
+        isLayoutOpen={isLayoutPopoverOpen}
+        hasAttention={
+          totalUnread > 0 || Object.values(panelStatuses).some((s) => s.status === 'waiting')
+        }
+        onOpenNotifications={focusNextUnread}
+        onOpenSettings={() => {}}
+      />
+
+      {/* Layout Popover (Section 2.3) */}
+      <LayoutPopover
+        isOpen={isLayoutPopoverOpen}
+        onClose={() => setIsLayoutPopoverOpen(false)}
+        layout={activeWorkspace.layout || { mode: 'stack', rows: 1, cols: 2 }}
+        onSelectMode={(mode) => setLayoutMode(mode)}
+        onSelectPreset={(rows, cols) => {
+          setLayoutGridPreset(rows, cols)
+          setIsLayoutPopoverOpen(false)
+        }}
+      />
+
+      {/* Main Layout Shell */}
+      <div className="main-layout-shell">
+        {/* Floating Sidebar Card (Section 2.2) */}
+        {isSidebarVisible && (
+          <Sidebar
+            workspaces={appState.workspaces}
+            activeWorkspaceId={appState.activeWorkspaceId}
+            activePanelId={activePanelId}
+            panelStatuses={panelStatuses}
+            collapsedWorkspaceIds={collapsedWorkspaceIds}
+            missingPaths={missingPaths}
+            onSwitchWorkspace={switchWorkspace}
+            onCreateWorkspace={() => createWorkspace('')}
+            onToggleCollapse={toggleWorkspaceCollapse}
+            onSelectPanel={(panelId, wsId) => {
+              if (wsId !== appState.activeWorkspaceId) switchWorkspace(wsId)
+              selectPanel(panelId)
+            }}
+            width={sidebarWidth}
+          />
+        )}
+
+        {/* Workspace Column: Stack or Grid */}
+        <div className="workspace-column">
+          <WorkspaceGrid
+            workspace={activeWorkspace}
+            activePanelId={activePanelId}
+            maximizedPanelId={maximizedPanelId}
+            panelStatuses={panelStatuses}
+            searchPanelId={searchPanelId}
+            onSelectPanel={selectPanel}
+            onToggleMaximize={toggleMaximize}
+            onClosePanel={removePanel}
+            onLaunchAgent={launchAgent}
+            onRestartAgent={restartAgent}
+            onToggleSearch={(id) => setSearchPanelId((curr) => (curr === id ? null : id))}
+            onUpdatePanel={updatePanel}
+            onAddNewPanel={() => setIsNewPanelModalOpen(true)}
+          />
+          <CommandBar
+            workspace={activeWorkspace}
+            activePanelId={activePanelId}
+            panelStatuses={panelStatuses}
+            detection={agentDetection}
+            inputRef={commandInputRef}
+            onSendPrompt={sendPrompt}
+            onStartAgent={startAgentWithPrompt}
+          />
         </div>
 
-        <div className="titlebar-actions">
-          {totalUnread > 0 && (
-            <button
-              className="btn btn-sm"
-              onClick={focusNextUnread}
-              style={{ background: '#d2992226', color: '#e3b341', borderColor: 'rgba(210,153,34,0.4)' }}
-              title="Next unread panel (Cmd+U)"
-            >
-              <Bell size={12} />
-              <span>{totalUnread} waiting</span>
-            </button>
-          )}
-
-          <button
-            className="btn btn-sm"
-            onClick={() => setIsTemplateModalOpen(true)}
-            title="Workspace templates"
-          >
-            <Bookmark size={12} />
-            <span>Templates</span>
-          </button>
-
-          <button
-            className="btn btn-sm btn-primary"
-            onClick={() => setIsNewPanelModalOpen(true)}
-            title="Add panel (Cmd+N)"
-          >
-            <Plus size={12} />
-            <span>New Panel</span>
-          </button>
-        </div>
-      </header>
-
-      {/* Main Layout */}
-      <div className="main-layout">
-        <Sidebar
-          workspaces={appState.workspaces}
-          activeWorkspaceId={appState.activeWorkspaceId}
-          activeWorkspace={activeWorkspace}
-          activePanelId={activePanelId}
-          panelStatuses={panelStatuses}
-          onSwitchWorkspace={switchWorkspace}
-          onCreateWorkspace={() => createWorkspace('')}
-          onSetLayout={setLayout}
-          onSelectPanel={selectPanel}
-          onOpenTemplates={() => setIsTemplateModalOpen(true)}
-        />
-
-        <WorkspaceGrid
-          workspace={activeWorkspace}
-          activePanelId={activePanelId}
-          maximizedPanelId={maximizedPanelId}
-          panelStatuses={panelStatuses}
-          searchPanelId={searchPanelId}
-          onSelectPanel={selectPanel}
-          onToggleMaximize={toggleMaximize}
-          onClosePanel={removePanel}
-          onLaunchAgent={launchAgent}
-          onRestartAgent={restartAgent}
-          onToggleSearch={(id) => setSearchPanelId((curr) => (curr === id ? null : id))}
-          onUpdatePanel={updatePanel}
-          onAddNewPanel={() => setIsNewPanelModalOpen(true)}
-        />
+        {/* Reserved right slot (Section 2.9, empty/hidden until Phase D1) */}
+        <div className="reserved-right-slot" style={{ display: 'none' }} aria-hidden="true" />
       </div>
+
+      {/* Action triggers for New Panel and Multi-Agent Lineup Launch */}
+      <button
+        type="button"
+        style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', border: 0 }}
+        data-open-new-panel
+        onClick={() => setIsNewPanelModalOpen(true)}
+        aria-hidden="true"
+        tabIndex={-1}
+      >
+        New Panel
+      </button>
+      <button
+        type="button"
+        style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', border: 0 }}
+        data-open-launch
+        onClick={() => setIsLaunchModalOpen(true)}
+        aria-hidden="true"
+        tabIndex={-1}
+      >
+        Launch
+      </button>
 
       {/* Modals */}
       <NewPanelModal
         isOpen={isNewPanelModalOpen}
-        defaultCwd={
-          activeWorkspace.panels.find((p) => p.id === activePanelId)?.cwd ||
-          process.env.HOME ||
-          '/'
-        }
+        defaultCwd={activePanelCwd}
         lastUsedFolder={lastUsedFolder}
         agentSettings={agentSettings}
+        detection={agentDetection}
+        isDetecting={isDetectingAgents}
+        onRefreshAgents={() => void refreshAgents(true)}
         onClose={() => setIsNewPanelModalOpen(false)}
-        onCreate={addPanel}
+        onCreate={(panel, folder, options) => void addPanel(panel, folder, options)}
+      />
+
+      <AgentLaunchModal
+        isOpen={isLaunchModalOpen}
+        defaultCwd={lastUsedFolder || activePanelCwd}
+        detection={agentDetection}
+        onClose={() => setIsLaunchModalOpen(false)}
+        onLaunch={(name, cwd, lineup) => void launchLineup(name, cwd, lineup)}
       />
 
       <TemplateModal

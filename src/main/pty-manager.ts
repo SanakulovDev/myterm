@@ -264,11 +264,14 @@ export class PtyManager {
    * tell this: /bin/sh runs as "bash", and `bash -c` started from bash looks
    * like the shell. An idle shell is never busy; a terminal whose foreground
    * group cannot be read counts as idle.
+   *
+   * `only` limits the check to those panels.
    */
-  public busyPanels(): BusyPanel[] {
+  public busyPanels(only?: readonly string[]): BusyPanel[] {
     const busy: BusyPanel[] = []
     const shells: Array<[string, PtyEntry]> = []
     for (const [id, entry] of this.ptys) {
+      if (only && !only.includes(id)) continue
       if (entry.runningAgent) busy.push({ id, process: entry.runningAgent })
       else shells.push([id, entry])
     }

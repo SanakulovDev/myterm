@@ -1,11 +1,70 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { AppState, WorkspaceConfig, PanelConfig, PanelStatus, AgentKind } from '../../../shared/types'
+import { AgentKind, AppState, WorkspaceConfig, PanelConfig, PanelStatus, LayoutMode } from '../../../shared/types'
+import {
+  AgentDetectionResult,
+  NO_AGENT,
+  agentLabel,
+  getAgent,
+  isAgentPanel,
+  layoutForCount,
+  resolveAgentArgs,
+  resolveAgentCommand
+} from '../../../shared/agents'
+import { DEFAULT_UI_STATE } from '../../../shared/layout'
 import { terminalRegistry } from '../terminal/terminals'
 
-const AGENT_DEFAULT_COMMANDS: Record<AgentKind, string> = {
-  none: '',
-  claude: 'claude',
-  codex: 'codex'
+/** One panel of a lineup launched together (a preset). */
+export interface LineupPanel {
+  agent: string
+  title: string
+  /** The agent's first prompt; ignored by agents that cannot take one. */
+  prompt?: string
+}
+
+let panelSequence = 0
+
+// Unique even for several panels created in the same millisecond.
+function newPanelId(): string {
+  panelSequence += 1
+  return `panel-${Date.now()}-${panelSequence}`
+}
+
+/**
+ * A new panel from what the caller chose; the rest comes from the agent
+ * settings (command, arguments) and the registry (title).
+ */
+function buildPanel(
+  id: string,
+  config: Partial<PanelConfig>,
+  state: AppState,
+  defaultShell: string
+): PanelConfig {
+  const agent = config.agent || NO_AGENT
+  const isAgent = isAgentPanel({ agent })
+  const known = !!getAgent(agent)
+  const agentCommand = isAgent
+    ? config.agentCommand?.trim() ||
+      (known ? resolveAgentCommand(agent, state.agentSettings) : undefined)
+    : undefined
+  // Arguments the caller gave win, even none (a cleared field); otherwise the
+  // agent's saved or default arguments.
+  const givenArgs = config.agentArgs
+  const agentArgs = isAgent
+    ? (givenArgs !== undefined
+        ? givenArgs.trim()
+        : known
+          ? resolveAgentArgs(agent, state.agentSettings)
+          : '') || undefined
+    : undefined
+  return {
+    id,
+    title: config.title?.trim() || agentLabel({ agent, agentCommand }),
+    cwd: config.cwd || state.lastUsedFolder || '/',
+    agent,
+    agentCommand,
+    agentArgs,
+    shell: config.shell || defaultShell
+  }
 }
 
 // Templates saved before schema v2 may still carry runtime fields.
@@ -24,7 +83,35 @@ export function useAppStore() {
   >({})
   const [isNewPanelModalOpen, setIsNewPanelModalOpen] = useState(false)
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
+  const [isLaunchModalOpen, setIsLaunchModalOpen] = useState(false)
   const [searchPanelId, setSearchPanelId] = useState<string | null>(null)
+  const [agentDetection, setAgentDetection] = useState<AgentDetectionResult | null>(null)
+  const [isDetectingAgents, setIsDetectingAgents] = useState(false)
+  const [missingPaths, setMissingPaths] = useState<Set<string>>(new Set())
+
+  // Check which workspaces have missing rootPath
+  useEffect(() => {
+    if (!appState || !window.electronAPI?.pathsExist) return
+    const pathsToCheck = appState.workspaces
+      .map((w) => w.rootPath)
+      .filter((p): p is string => typeof p === 'string' && p.length > 0)
+
+    if (pathsToCheck.length === 0) {
+      setMissingPaths(new Set())
+      return
+    }
+
+    window.electronAPI
+      .pathsExist(pathsToCheck)
+      .then((existsList) => {
+        const missing = new Set<string>()
+        pathsToCheck.forEach((p, idx) => {
+          if (!existsList[idx]) missing.add(p)
+        })
+        setMissingPaths(missing)
+      })
+      .catch(() => {})
+  }, [appState?.workspaces])
 
   // Load initial state from disk
   useEffect(() => {
@@ -41,6 +128,23 @@ export function useAppStore() {
     }
     init()
   }, [])
+
+  // Which agent CLIs are installed. Main keeps the result; `refresh` checks again.
+  const refreshAgents = useCallback(async (refresh = false) => {
+    if (!window.electronAPI?.detectAgents) return
+    setIsDetectingAgents(true)
+    try {
+      setAgentDetection(await window.electronAPI.detectAgents(refresh))
+    } catch {
+      // The last result stays; agents without one count as launchable.
+    } finally {
+      setIsDetectingAgents(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshAgents(false)
+  }, [refreshAgents])
 
   // Auto-save state when appState changes
   useEffect(() => {
@@ -116,42 +220,76 @@ export function useAppStore() {
       return {
         ...prev,
         workspaces: prev.workspaces.map((ws) =>
-          ws.id === prev.activeWorkspaceId ? { ...ws, layout: { rows, cols } } : ws
+          ws.id === prev.activeWorkspaceId
+            ? { ...ws, layout: { ...ws.layout, mode: 'grid' as const, rows, cols } }
+            : ws
         )
       }
     })
   }, [])
 
+  const handleSetLayoutMode = useCallback((mode: LayoutMode) => {
+    setAppState((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        workspaces: prev.workspaces.map((ws) =>
+          ws.id === prev.activeWorkspaceId
+            ? { ...ws, layout: { ...ws.layout, mode } }
+            : ws
+        )
+      }
+    })
+  }, [])
+
+  const handleToggleSidebar = useCallback(() => {
+    setAppState((prev) => {
+      if (!prev) return prev
+      const currentUi = prev.ui || DEFAULT_UI_STATE
+      return {
+        ...prev,
+        ui: {
+          ...currentUi,
+          sidebarVisible: !currentUi.sidebarVisible
+        }
+      }
+    })
+  }, [])
+
+  const handleToggleWorkspaceCollapse = useCallback((wsId: string) => {
+    setAppState((prev) => {
+      if (!prev) return prev
+      const currentUi = prev.ui || DEFAULT_UI_STATE
+      const collapsed = currentUi.collapsedWorkspaceIds || []
+      const isCollapsed = collapsed.includes(wsId)
+      const nextCollapsed = isCollapsed
+        ? collapsed.filter((id) => id !== wsId)
+        : [...collapsed, wsId]
+      return {
+        ...prev,
+        ui: {
+          ...currentUi,
+          collapsedWorkspaceIds: nextCollapsed
+        }
+      }
+    })
+  }, [])
+
   const handleAddPanel = useCallback(
-    async (config: Partial<PanelConfig>, folderToRemember?: string) => {
-      if (!appState || !activeWorkspace) return
+    async (
+      config: Partial<PanelConfig>,
+      folderToRemember?: string,
+      options: { prompt?: string } = {}
+    ): Promise<string | undefined> => {
+      if (!appState || !activeWorkspace) return undefined
 
       const defaultShell = await window.electronAPI.getDefaultShell()
-      const newId = `panel-${Date.now()}`
-      const isAgent = config.agent === 'claude' || config.agent === 'codex'
-      const defaultTitle =
-        config.agent === 'claude' ? 'Claude Code' : config.agent === 'codex' ? 'Codex' : 'Shell'
-
-      const newPanel: PanelConfig = {
-        id: newId,
-        title: config.title || defaultTitle,
-        cwd: config.cwd || appState.lastUsedFolder || process.env.HOME || '/',
-        agent: config.agent || 'none',
-        agentCommand:
-          config.agentCommand ||
-          (isAgent
-            ? appState.agentSettings?.[config.agent as 'claude' | 'codex']?.command ||
-              AGENT_DEFAULT_COMMANDS[config.agent as AgentKind]
-            : undefined),
-        agentArgs:
-          config.agentArgs ||
-          (isAgent ? appState.agentSettings?.[config.agent as 'claude' | 'codex']?.args : undefined),
-        shell: config.shell || defaultShell
-      }
+      const newId = newPanelId()
+      const newPanel = buildPanel(newId, config, appState, defaultShell)
 
       // Only a panel created here auto-launches its agent (on its first spawn).
-      if (isAgent) {
-        terminalRegistry.markLaunchPending(newId)
+      if (isAgentPanel(newPanel)) {
+        terminalRegistry.markLaunchPending(newId, options.prompt)
       }
 
       setAppState((prev) => {
@@ -171,6 +309,7 @@ export function useAppStore() {
       })
 
       handleSelectPanel(newId)
+      return newId
     },
     [appState, activeWorkspace, handleSelectPanel]
   )
@@ -256,14 +395,14 @@ export function useAppStore() {
       const initialPanels: PanelConfig[] = templatePanels
         ? templatePanels.map((p, idx) => ({
             ...stripRuntimeFields(p),
-            id: `panel-${Date.now()}-${idx}`,
+            id: `${newPanelId()}-${idx}`,
             shell: p.shell || defaultShell
           }))
         : [
             {
-              id: `panel-${Date.now()}-1`,
+              id: newPanelId(),
               title: 'Terminal 1',
-              cwd: process.env.HOME || '/',
+              cwd: appState.lastUsedFolder || '/',
               agent: 'none',
               shell: defaultShell
             }
@@ -272,7 +411,8 @@ export function useAppStore() {
       const newWorkspace: WorkspaceConfig = {
         id: newWsId,
         name: name || `Workspace ${appState.workspaces.length + 1}`,
-        layout: { rows: 1, cols: Math.min(initialPanels.length, 3) || 1 },
+        rootPath: appState.lastUsedFolder,
+        layout: { mode: 'stack', rows: 1, cols: Math.min(initialPanels.length, 3) || 1 },
         panels: initialPanels,
         panelOrder: initialPanels.map((p) => p.id)
       }
@@ -289,6 +429,74 @@ export function useAppStore() {
       handleSelectPanel(initialPanels[0].id)
     },
     [appState, handleSelectPanel]
+  )
+
+  // A preset: a new workspace whose panels start their agents (with their
+  // first prompts) as soon as they are shown.
+  const handleLaunchLineup = useCallback(
+    async (name: string, cwd: string, lineup: LineupPanel[]) => {
+      if (!appState || lineup.length === 0) return
+      const defaultShell = await window.electronAPI.getDefaultShell()
+      const panels = lineup.map((slot) =>
+        buildPanel(
+          newPanelId(),
+          { agent: slot.agent as AgentKind, title: slot.title, cwd },
+          appState,
+          defaultShell
+        )
+      )
+      panels.forEach((panel, i) => {
+        if (isAgentPanel(panel)) terminalRegistry.markLaunchPending(panel.id, lineup[i].prompt)
+      })
+
+      const newWorkspace: WorkspaceConfig = {
+        id: `ws-${Date.now()}`,
+        name: name.trim() || `Workspace ${appState.workspaces.length + 1}`,
+        rootPath: cwd || appState.lastUsedFolder,
+        layout: { mode: 'stack', ...layoutForCount(panels.length) },
+        panels,
+        panelOrder: panels.map((p) => p.id)
+      }
+
+      setMaximizedPanelId(null)
+      setAppState((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          lastUsedFolder: cwd || prev.lastUsedFolder,
+          workspaces: [...prev.workspaces, newWorkspace],
+          activeWorkspaceId: newWorkspace.id
+        }
+      })
+      handleSelectPanel(panels[0].id)
+    },
+    [appState, handleSelectPanel]
+  )
+
+  /** Types `text` into a panel's running program and submits it. */
+  const handleSendPrompt = useCallback(
+    (panelId: string, text: string): boolean => {
+      const sent = terminalRegistry.sendPrompt(panelId, text, true)
+      if (sent) handleSelectPanel(panelId)
+      return sent
+    },
+    [handleSelectPanel]
+  )
+
+  /**
+   * A new panel in the current workspace running `agent` with `text` as its
+   * first prompt, in the folder of the active panel.
+   */
+  const handleStartAgentWithPrompt = useCallback(
+    (agent: string, text: string): Promise<string | undefined> => {
+      const active = activeWorkspace?.panels.find((p) => p.id === activePanelId)
+      return handleAddPanel(
+        { agent: agent as AgentKind, cwd: active?.cwd || appState?.lastUsedFolder },
+        undefined,
+        { prompt: text }
+      )
+    },
+    [activeWorkspace, activePanelId, appState, handleAddPanel]
   )
 
   // Launch and Restart both respawn the panel's PTY through the launch script
@@ -319,18 +527,34 @@ export function useAppStore() {
     lastUsedFolder: appState?.lastUsedFolder,
     isNewPanelModalOpen,
     isTemplateModalOpen,
+    isLaunchModalOpen,
     searchPanelId,
+    agentDetection,
+    isDetectingAgents,
+    missingPaths,
+    isSidebarVisible: appState?.ui?.sidebarVisible ?? true,
+    sidebarWidth: appState?.ui?.sidebarWidth ?? 264,
+    collapsedWorkspaceIds: appState?.ui?.collapsedWorkspaceIds ?? [],
+    refreshAgents,
     setSearchPanelId,
     setIsNewPanelModalOpen,
     setIsTemplateModalOpen,
+    setIsLaunchModalOpen,
     selectPanel: handleSelectPanel,
     toggleMaximize: handleToggleMaximize,
     setLayout: handleSetLayout,
+    setLayoutMode: handleSetLayoutMode,
+    setLayoutGridPreset: handleSetLayout,
+    toggleSidebar: handleToggleSidebar,
+    toggleWorkspaceCollapse: handleToggleWorkspaceCollapse,
     addPanel: handleAddPanel,
     removePanel: handleRemovePanel,
     updatePanel: handleUpdatePanel,
     switchWorkspace: handleSwitchWorkspace,
     createWorkspace: handleCreateWorkspace,
+    launchLineup: handleLaunchLineup,
+    sendPrompt: handleSendPrompt,
+    startAgentWithPrompt: handleStartAgentWithPrompt,
     launchAgent: handleRequestLaunch,
     restartAgent: handleRequestLaunch,
     focusNextUnread: handleFocusNextUnread

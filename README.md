@@ -1,6 +1,6 @@
 # Agent Terminal (`myterm`)
 
-Multi-panel macOS terminal workspace for running AI coding agents (Claude Code, Codex, and others) side by side with attention-aware status tracking, native macOS notifications, and session persistence.
+Multi-panel macOS terminal workspace for running AI coding agents (Claude Code, Codex, Gemini CLI, and others) side by side with attention-aware status tracking, native macOS notifications, and session persistence.
 
 ---
 
@@ -8,7 +8,10 @@ Multi-panel macOS terminal workspace for running AI coding agents (Claude Code, 
 
 - **Multi-panel Grid:** 1–9 independent shell panels in preset layouts (1×1, 1×2, 2×2, 2×3, 3×3).
 - **Independent PTY Sessions:** Native `node-pty` instances running the panel's login shell (default: your account's shell) with your environment, PATH, and UTF-8 / truecolor support (see [Terminal Behavior](#terminal-behavior)).
-- **Agent Lifecycle & One-Action Launch:** Attach project folders and coding agents (Claude Code, Codex) to panels; the agent starts automatically when the panel is created, and the panel header has Launch / Restart buttons.
+- **Agent Lifecycle & One-Action Launch:** Attach project folders and coding agents to panels; the agent starts automatically when the panel is created, optionally with a first prompt, and the panel header has Launch / Restart buttons. Twelve agent CLIs are built in, plus any custom command (see [Agents](#agents)).
+- **Agent Detection:** The New Panel dialog lists the agents installed in your login shell first; missing ones are listed apart with their install command.
+- **Launch Presets:** Solo, Pair, Workbench and Swarm open several agents at once in a new workspace. Swarm gives each agent a role (architect, builder, reviewer, tester) and the same task.
+- **Command Bar:** A prompt box under the grid (`Cmd+L`). A prompt goes to the agent running in the active panel; with nothing running there, it starts an agent with that prompt.
 - **Attention & Status Tracking:**
   - `idle`, `running`, `waiting`, `done`, `exited`, `error` states.
   - Primary strategy: Unix domain socket hook receiver (`AGENT_TERMINAL_SOCKET`).
@@ -58,6 +61,7 @@ The end-to-end tests drive the app through the Chromium remote debugging port (r
 | Shortcut | Action |
 |---|---|
 | `Cmd + N` | New terminal panel |
+| `Cmd + L` | Focus the command bar (`Esc` goes back to the active panel) |
 | `Cmd + W` | Close focused panel |
 | `Cmd + 1…9` | Focus panel 1–9 |
 | `Cmd + Option + Arrow` | Move focus across panels |
@@ -90,6 +94,45 @@ Panels aim to behave like a native macOS terminal (Ghostty, cmux) for the progra
 
 ---
 
+## Agents
+
+| Agent | Command | First prompt passed as |
+|---|---|---|
+| Claude Code | `claude` | `claude -- "<prompt>"` |
+| Codex | `codex` | `codex -- "<prompt>"` |
+| Gemini CLI | `gemini` | `gemini -i "<prompt>"` |
+| OpenCode | `opencode` | `opencode --prompt "<prompt>"` |
+| Cursor Agent | `cursor-agent` | `cursor-agent -- "<prompt>"` |
+| Copilot CLI | `copilot` | `copilot -i "<prompt>"` |
+| Qwen Code | `qwen` | `qwen -i "<prompt>"` |
+| Amp, Aider, Crush, Droid | `amp`, `aider`, `crush`, `droid` | not supported (the agent starts without it) |
+| Goose | `goose session` | not supported |
+
+Every prompt flag keeps the agent open in its panel (interactive mode); non-interactive flags such as `-p` or `exec` are never used. The prompt is one argument, passed through an environment variable: quotes, `$(...)` and leading dashes reach the agent as typed and are never run by the shell. Prompts are limited to 32,000 characters.
+
+**Detection.** At startup the app runs one login + interactive shell (the same kind of shell an agent launch uses, so the same PATH) and checks each agent command with `command -v`. Only each command's presence (found, shell function, missing) and, when found, its path are read. No environment value, alias or function body is printed or stored. The result is kept until the agent commands change; the refresh button in the New Panel dialog checks again, for example after you install an agent. A command found only as a shell function counts as installed. An alias does not (see the limits under [Agent Auto-Launch](#agent-auto-launch)).
+
+**New Panel** (`Cmd+N`): installed agents first, then Shell and Custom. Missing agents are under "Not installed" with the install command (Copy) and the homepage. **Extra Arguments** starts from the agent's saved arguments; clearing it starts the agent with none. **First Prompt** is sent on the command line, as in the table above.
+
+**Launch** (title bar): pick a preset, change any slot's agent or title, add or remove slots (up to 9), and optionally give a task. The panels open in a new workspace in the chosen folder. Slots start with your installed agents, in turn.
+
+| Preset | Panels |
+|---|---|
+| Solo | One agent |
+| Pair | Two agents side by side |
+| Workbench | Up to three agents and a shell for builds and tests |
+| Swarm | Architect, Builder, Reviewer, Tester. Each gets its role's brief, then `Task: <your task>`, as its first prompt |
+
+**Command bar** (under the grid, `Cmd+L`): `Enter` sends, `Shift+Enter` adds a line, `Esc` returns to the active panel.
+
+- **Auto** (default): when a program runs in the active panel, the prompt is typed into that panel and submitted. That is an agent started from the app (status `running`, `waiting` or `done`), or any command in the foreground of the panel's shell, such as `claude` typed by hand (checked as described under [What counts as "running"](#what-counts-as-running), when the bar gets focus and again on send). Otherwise a new panel opens in the active panel's folder and starts an agent with the prompt. In Auto, a prompt is never typed into an idle shell, where it would run as a command.
+- The target menu can instead send to any panel of the workspace, or start a specific agent. The agent last started from the bar is remembered on this computer and used by Auto.
+- Sending to a panel types the text as a paste, then presses Return. Agents that turn on bracketed paste (such as Claude Code) get a multi-line prompt as one message.
+
+Panels restored when the app reopens are plain shells: no agent starts and no prompt is sent again.
+
+---
+
 ## Agent Auto-Launch
 
 A panel created from the **New Panel** dialog with an agent starts that agent right away. Panels restored when the app reopens start a plain shell; use the header **Launch** button to start the agent again.
@@ -101,7 +144,7 @@ How it runs:
 - When the agent exits, the script replaces itself with an interactive login shell (`exec <shell> -l`), so the panel stays usable. Status goes back to `idle` with the exit code.
 - **Ctrl+C** goes to the agent as usual. If the agent exits because of it, the shell still appears (status detail: "Agent interrupted").
 - **Launch / Restart** in the panel header restart the panel's shell and start the agent again. Anything else running in that panel's shell is stopped.
-- The agent command, its arguments and the folder are never pasted into the script text, so folders with spaces, quotes or apostrophes are safe.
+- The agent command, its arguments, the first prompt and the folder are never pasted into the script text, so folders with spaces, quotes or apostrophes are safe.
 
 Limits:
 

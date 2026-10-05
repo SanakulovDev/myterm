@@ -8,6 +8,7 @@ const api: ElectronAPI = {
   killPty: (id: string) => ipcRenderer.send('pty:kill', id),
 
   openDirectory: (defaultPath?: string) => ipcRenderer.invoke('dialog:open-directory', defaultPath),
+  pathsExist: (paths: string[]) => ipcRenderer.invoke('fs:paths-exist', paths),
 
   loadState: () => ipcRenderer.invoke('state:load'),
   saveState: (state: AppState) => ipcRenderer.invoke('state:save', state),
@@ -17,6 +18,8 @@ const api: ElectronAPI = {
   deleteScrollback: (panelId: string) => ipcRenderer.invoke('state:delete-scrollback', panelId),
 
   getDefaultShell: () => ipcRenderer.invoke('shell:get-default'),
+  detectAgents: (refresh?: boolean) => ipcRenderer.invoke('agents:detect', refresh === true),
+  isPtyBusy: (id: string) => ipcRenderer.invoke('pty:is-busy', id),
   updateBadge: (count: number) => ipcRenderer.send('app:update-badge', count),
   sendNotification: (title: string, body: string, panelId?: string) =>
     ipcRenderer.send('app:notify', title, body, panelId),

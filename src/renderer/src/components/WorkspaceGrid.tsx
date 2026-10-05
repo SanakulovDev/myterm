@@ -1,7 +1,8 @@
 import React from 'react'
 import { WorkspaceConfig, PanelConfig, PanelStatus } from '../../../shared/types'
+import { placePanels } from '../../../shared/layout'
 import { TerminalPanel } from './TerminalPanel'
-import { Plus, TerminalSquare } from 'lucide-react'
+import { PlusIcon } from './Icons'
 
 interface WorkspaceGridProps {
   workspace: WorkspaceConfig
@@ -17,6 +18,7 @@ interface WorkspaceGridProps {
   onToggleSearch: (id: string) => void
   onUpdatePanel?: (id: string, updates: Partial<PanelConfig>) => void
   onAddNewPanel: () => void
+  onOpenPanelMenu?: (panelId: string, e: React.MouseEvent) => void
 }
 
 export const WorkspaceGrid: React.FC<WorkspaceGridProps> = ({
@@ -31,60 +33,90 @@ export const WorkspaceGrid: React.FC<WorkspaceGridProps> = ({
   onLaunchAgent,
   onRestartAgent,
   onToggleSearch,
-  onAddNewPanel
+  onAddNewPanel,
+  onOpenPanelMenu
 }) => {
-  const { layout, panels } = workspace
+  const { layout = { mode: 'stack', rows: 1, cols: 2 }, panels, name } = workspace
 
   if (panels.length === 0) {
     return (
-      <div className="workspace-container">
-        <div className="empty-state">
-          <TerminalSquare size={48} strokeWidth={1.5} />
-          <h3>No panels in this workspace</h3>
-          <p>Add a new terminal panel to get started running agents or commands.</p>
-          <button className="btn btn-primary" onClick={onAddNewPanel}>
-            <Plus size={14} />
-            New Panel
+      <div className="workspace-empty-container">
+        <div className="empty-panel-card">
+          <p className="empty-card-subtitle">No panels open in this workspace.</p>
+          <button type="button" className="btn btn-primary" onClick={onAddNewPanel}>
+            <PlusIcon size={14} />
+            <span>New Panel</span>
           </button>
         </div>
       </div>
     )
   }
 
-  // Calculate grid template
-  const gridStyle: React.CSSProperties = {
-    gridTemplateColumns: `repeat(${layout.cols || 1}, minmax(0, 1fr))`,
-    gridTemplateRows: `repeat(${layout.rows || 1}, minmax(0, 1fr))`
-  }
+  // Calculate placement based on stack or grid mode
+  const placement = placePanels(panels.length, layout)
+
+  const isAnyMaximized = Boolean(maximizedPanelId)
+
+  const wrapperStyle: React.CSSProperties = isAnyMaximized
+    ? {
+        display: 'grid',
+        gridTemplateRows: '1fr',
+        gridTemplateColumns: '1fr',
+        height: '100%',
+        width: '100%'
+      }
+    : {
+        display: 'grid',
+        gridTemplateRows: `repeat(${placement.rows}, minmax(0, 1fr))`,
+        gridTemplateColumns: `repeat(${placement.tracks}, minmax(0, 1fr))`,
+        gap: 'var(--gap)',
+        height: '100%',
+        width: '100%'
+      }
 
   return (
-    <div className="workspace-container">
-      <div className="grid-wrapper" style={gridStyle}>
-        {panels.map((panel) => {
+    <div className="workspace-main-area">
+      <div className="panels-grid-wrapper" style={wrapperStyle}>
+        {panels.map((panel, index) => {
           const isMaximized = maximizedPanelId === panel.id
-          // Panels hidden behind a maximized one stay mounted but release their
-          // WebGL renderer. Remounts are harmless: the terminal registry keeps
-          // every session (and its PTY) until the panel is closed.
-          const isHidden = !!maximizedPanelId && !isMaximized
+          const isHidden = isAnyMaximized && !isMaximized
+          const cell = placement.cells[index]
+
+          const cellStyle: React.CSSProperties = isAnyMaximized
+            ? isMaximized
+              ? { gridRow: '1', gridColumn: '1', height: '100%', width: '100%' }
+              : { display: 'none' }
+            : cell
+              ? {
+                  gridRow: `${cell.row}`,
+                  gridColumn: `${cell.colStart} / ${cell.colEnd}`,
+                  minWidth: 0,
+                  minHeight: 0
+                }
+              : {}
 
           return (
-            <TerminalPanel
-              key={panel.id}
-              panel={panel}
-              isActive={!isHidden && activePanelId === panel.id}
-              isMaximized={isMaximized}
-              isHidden={isHidden}
-              isUnread={panelStatuses[panel.id]?.unread}
-              status={panelStatuses[panel.id]?.status ?? 'idle'}
-              statusDetail={panelStatuses[panel.id]?.detail}
-              isSearchOpen={searchPanelId === panel.id}
-              onLaunchAgent={onLaunchAgent && (() => onLaunchAgent(panel.id))}
-              onRestartAgent={onRestartAgent && (() => onRestartAgent(panel.id))}
-              onSelect={() => onSelectPanel(panel.id)}
-              onToggleMaximize={() => onToggleMaximize(panel.id)}
-              onClose={() => onClosePanel(panel.id)}
-              onToggleSearch={() => onToggleSearch(panel.id)}
-            />
+            <div key={panel.id} style={cellStyle} className="panel-grid-cell">
+              <TerminalPanel
+                panel={panel}
+                projectName={name}
+                isActive={!isHidden && activePanelId === panel.id}
+                isMaximized={isMaximized}
+                isHidden={isHidden}
+                isUnread={panelStatuses[panel.id]?.unread}
+                status={panelStatuses[panel.id]?.status ?? 'idle'}
+                statusDetail={panelStatuses[panel.id]?.detail}
+                isSearchOpen={searchPanelId === panel.id}
+                onLaunchAgent={onLaunchAgent && (() => onLaunchAgent(panel.id))}
+                onRestartAgent={onRestartAgent && (() => onRestartAgent(panel.id))}
+                onSelect={() => onSelectPanel(panel.id)}
+                onToggleMaximize={() => onToggleMaximize(panel.id)}
+                onClose={() => onClosePanel(panel.id)}
+                onAddPanel={onAddNewPanel}
+                onOpenMenu={onOpenPanelMenu ? (e) => onOpenPanelMenu(panel.id, e) : undefined}
+                onToggleSearch={() => onToggleSearch(panel.id)}
+              />
+            </div>
           )
         })}
       </div>

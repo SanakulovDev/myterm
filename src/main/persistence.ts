@@ -1,12 +1,21 @@
 import { app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
-import { AgentSettings, AppState, PanelConfig, WorkspaceConfig } from '../shared/types'
+import { AgentSettings, AppState, PanelConfig, UiState, WorkspaceConfig } from '../shared/types'
+import { DEFAULT_UI_STATE, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from '../shared/layout'
 import { resolveDefaultShell } from './launch-script'
 
 // v1: panels carried runtime fields (status, unread, autoLaunch).
 // v2: panels hold configuration only; agentSettings always complete.
-export const CURRENT_SCHEMA_VERSION = 2
+//
+// More agents (gemini, opencode, ...) did not need v3: a panel's `agent` is
+// still a string with its command in `agentCommand`, and agentSettings only
+// gains optional entries next to claude and codex. Earlier v2 builds keep
+// unknown keys and launch such a panel by its agentCommand.
+// v3: layout.mode ('stack' | 'grid', existing workspaces become stack with
+// their rows/cols kept for grid), optional workspace rootPath, and `ui`
+// (sidebar, collapsed projects). Every v3 field is optional on disk.
+export const CURRENT_SCHEMA_VERSION = 3
 
 // Runtime-only (or launch-intent) fields that must never be persisted.
 const RUNTIME_PANEL_FIELDS = ['status', 'unread', 'autoLaunch']
@@ -24,7 +33,7 @@ export function getDefaultState(): AppState {
   const defaultWorkspace: WorkspaceConfig = {
     id: defaultWorkspaceId,
     name: 'Main Workspace',
-    layout: { rows: 1, cols: 2 },
+    layout: { mode: 'stack', rows: 1, cols: 2 },
     panels: [
       {
         id: 'panel-1',
@@ -50,6 +59,7 @@ export function getDefaultState(): AppState {
     lastUsedFolder: process.env.HOME || '/',
     agentSettings: structuredClone(DEFAULT_AGENT_SETTINGS),
     window: { ...DEFAULT_WINDOW },
+    ui: structuredClone(DEFAULT_UI_STATE),
     schemaVersion: CURRENT_SCHEMA_VERSION
   }
 }
@@ -87,6 +97,35 @@ function mergeAgentSettings(raw: unknown): AgentSettings {
   return merged as unknown as AgentSettings
 }
 
+function positiveInt(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1 ? Math.floor(value) : fallback
+}
+
+// Before v3 every workspace was a grid; it becomes a stack and keeps its
+// rows/cols for the Grid choice.
+function migrateLayout(raw: unknown, version: number): Json {
+  const layout = isObject(raw) ? raw : {}
+  const mode = version >= 3 && (layout.mode === 'stack' || layout.mode === 'grid') ? layout.mode : 'stack'
+  return { ...layout, mode, rows: positiveInt(layout.rows, 1), cols: positiveInt(layout.cols, 2) }
+}
+
+function clamp(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+}
+
+function migrateUi(raw: unknown): UiState {
+  const ui = isObject(raw) ? raw : {}
+  return {
+    ...ui,
+    sidebarVisible: typeof ui.sidebarVisible === 'boolean' ? ui.sidebarVisible : DEFAULT_UI_STATE.sidebarVisible,
+    sidebarWidth: clamp(ui.sidebarWidth, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, DEFAULT_UI_STATE.sidebarWidth),
+    collapsedWorkspaceIds: Array.isArray(ui.collapsedWorkspaceIds)
+      ? ui.collapsedWorkspaceIds.filter((id): id is string => typeof id === 'string')
+      : [],
+    rightSlotWidth: clamp(ui.rightSlotWidth, 320, 400, DEFAULT_UI_STATE.rightSlotWidth)
+  }
+}
+
 /**
  * Bring any previously saved state up to the current schema. Pure and
  * idempotent. Unknown fields are kept. Returns null when the input has no
@@ -105,6 +144,7 @@ export function migrateState(raw: unknown, defaultShell: string): AppState | nul
 
   const workspaces = raw.workspaces.filter(isObject).map((ws) => ({
     ...ws,
+    layout: migrateLayout(ws.layout, version),
     panels: Array.isArray(ws.panels)
       ? ws.panels.filter(isObject).map((p) => migratePanel(p, defaultShell))
       : [],
@@ -119,6 +159,7 @@ export function migrateState(raw: unknown, defaultShell: string): AppState | nul
       typeof raw.activeWorkspaceId === 'string' ? raw.activeWorkspaceId : workspaces[0].id,
     agentSettings: mergeAgentSettings(raw.agentSettings),
     window: isObject(raw.window) ? (raw.window as AppState['window']) : { ...DEFAULT_WINDOW },
+    ui: migrateUi(raw.ui),
     schemaVersion: Math.max(version, CURRENT_SCHEMA_VERSION)
   } as AppState
 }
@@ -176,7 +217,7 @@ function chmodQuiet(target: string, mode: number): void {
 
 export class PersistenceService {
   private stateFilePath: string
-  private v1BackupPath: string
+  private userData: string
   private scrollbackDir: string
   // Scrollback writes and deletes of one panel run in order, one at a time.
   private readonly scrollbackQueues = new Map<string, Promise<unknown>>()
@@ -184,8 +225,8 @@ export class PersistenceService {
 
   constructor() {
     const userData = app.getPath('userData')
+    this.userData = userData
     this.stateFilePath = path.join(userData, 'workspace-state.json')
-    this.v1BackupPath = path.join(userData, 'workspace-state.v1-backup.json')
     this.scrollbackDir = path.join(userData, 'scrollbacks')
     try {
       fs.mkdirSync(this.scrollbackDir, { recursive: true, mode: PRIVATE_DIR_MODE })
@@ -234,7 +275,7 @@ export class PersistenceService {
       const rawVersion = isObject(parsed) ? parsed.schemaVersion : undefined
       if (typeof rawVersion !== 'number' || rawVersion < CURRENT_SCHEMA_VERSION) {
         console.log(`Migrating state from schemaVersion ${rawVersion ?? 1} to ${CURRENT_SCHEMA_VERSION}`)
-        this.backupBeforeMigration()
+        this.backupBeforeMigration(typeof rawVersion === 'number' ? rawVersion : 1)
         this.saveState(migrated)
       }
 
@@ -253,12 +294,17 @@ export class PersistenceService {
     }
   }
 
-  /** One-time copy of the pre-v2 file, written before the first v2 save. */
-  private backupBeforeMigration(): void {
+  /**
+   * One-time copy of the file as an older version wrote it, made before the
+   * first save in the current schema: workspace-state.v{N}-backup.json.
+   */
+  private backupBeforeMigration(fromVersion: number): void {
+    const version = Number.isInteger(fromVersion) && fromVersion >= 1 ? fromVersion : 1
+    const backupPath = path.join(this.userData, `workspace-state.v${version}-backup.json`)
     try {
-      if (!fs.existsSync(this.v1BackupPath)) {
-        fs.copyFileSync(this.stateFilePath, this.v1BackupPath)
-        chmodQuiet(this.v1BackupPath, PRIVATE_FILE_MODE)
+      if (!fs.existsSync(backupPath)) {
+        fs.copyFileSync(this.stateFilePath, backupPath)
+        chmodQuiet(backupPath, PRIVATE_FILE_MODE)
       }
     } catch (err) {
       console.error('Failed to back up state before migration:', err)

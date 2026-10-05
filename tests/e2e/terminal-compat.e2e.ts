@@ -45,7 +45,7 @@ const opened = () => app.main.eval<string[]>('globalThis.__opened')
 function waitForText(text: string | RegExp, timeoutMs = 15000): Promise<unknown> {
   const test =
     typeof text === 'string'
-      ? `.includes(${JSON.stringify(text)})`
+      ? `.replace(/\\r?\\n/g, '').includes(${JSON.stringify(text)})`
       : `.match(new RegExp(${JSON.stringify(text.source)}, ${JSON.stringify(text.flags)}))`
   return cdp.waitFor(
     `window.__myterm.terminal(${JSON.stringify(PANEL)})?.text${test}`,
@@ -202,7 +202,7 @@ describe('terminal compatibility', () => {
     const color = await cdp.eval<string>(
       `getComputedStyle(document.querySelector('${PANEL_SELECTOR} .xterm-viewport')).backgroundColor`
     )
-    expect(color).toBe('rgb(13, 17, 23)')
+    expect(color).toBe('rgb(12, 15, 19)')
   })
 
   it('gives programs a clean environment that names this terminal', async () => {
@@ -295,7 +295,8 @@ describe('terminal compatibility', () => {
     await writePty(`clear; printf '<%s>\\n' `)
     await delay(300)
     const t = await terminal()
-    await drop(await cellCenter(Math.floor(t.rows / 2), Math.floor(t.cols / 2)), [file])
+    const at = await cellCenter(Math.floor(t.rows / 2), Math.floor(t.cols / 2))
+    await drop(at, [file])
     // The command line shows the path as typed: escaped.
     await waitForText('drop\\ dir/it\\\'s\\ \\(1\\)\\ \\$x\\ ')
     await writePty('\r')

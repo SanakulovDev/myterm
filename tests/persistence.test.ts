@@ -27,7 +27,7 @@ describe('PersistenceService', () => {
     const state = service.loadState()
     expect(state).toBeDefined()
     expect(state.workspaces.length).toBeGreaterThan(0)
-    expect(state.schemaVersion).toBe(2)
+    expect(state.schemaVersion).toBe(3)
   })
 
   it('saves and reloads state atomically', () => {
@@ -51,11 +51,11 @@ describe('PersistenceService', () => {
 
     const loaded = service.loadState()
     expect(loaded).toBeDefined()
-    expect(loaded.schemaVersion).toBe(2)
+    expect(loaded.schemaVersion).toBe(3)
     expect(loaded.workspaces.length).toBeGreaterThan(0)
   })
 
-  it('migrates a v1 file on load: backup first, runtime fields stripped, saved as v2', () => {
+  it('migrates a v1 file on load: backup first, runtime fields stripped, saved as current', () => {
     const service = new PersistenceService()
     const stateFile = path.join(tmpDir, 'workspace-state.json')
     const backupFile = path.join(tmpDir, 'workspace-state.v1-backup.json')
@@ -69,13 +69,27 @@ describe('PersistenceService', () => {
 
     expect(fs.readFileSync(backupFile, 'utf8')).toBe(v1Raw)
     const onDisk = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
-    expect(onDisk.schemaVersion).toBe(2)
+    expect(onDisk.schemaVersion).toBe(3)
     expect(onDisk.workspaces[0].panels[0]).not.toHaveProperty('unread')
 
     // The backup is one-time: a later migration does not overwrite it.
     fs.writeFileSync(stateFile, JSON.stringify({ ...v1State(), lastUsedFolder: '/other' }), 'utf8')
     service.loadState()
     expect(fs.readFileSync(backupFile, 'utf8')).toBe(v1Raw)
+  })
+
+  it('backs up a v2 file under its own version before the v3 save', () => {
+    const service = new PersistenceService()
+    const stateFile = path.join(tmpDir, 'workspace-state.json')
+    const backupFile = path.join(tmpDir, 'workspace-state.v2-backup.json')
+    fs.rmSync(backupFile, { force: true })
+    const v2Raw = JSON.stringify({ ...v1State(), schemaVersion: 2 })
+    fs.writeFileSync(stateFile, v2Raw, 'utf8')
+
+    const loaded = service.loadState()
+    expect(loaded.workspaces[0].layout).toEqual({ mode: 'stack', rows: 1, cols: 2 })
+    expect(fs.readFileSync(backupFile, 'utf8')).toBe(v2Raw)
+    expect(JSON.parse(fs.readFileSync(stateFile, 'utf8')).schemaVersion).toBe(3)
   })
 
   it('never writes runtime panel fields', () => {
@@ -128,7 +142,7 @@ describe('migrateState', () => {
 
   it('strips runtime fields, keeps unknown fields and fills defaults', () => {
     const migrated = migrateState(v1State(), SHELL)!
-    expect(migrated.schemaVersion).toBe(2)
+    expect(migrated.schemaVersion).toBe(3)
     const [p1, p2] = migrated.workspaces[0].panels
     expect(p1).toEqual({
       id: 'p-1',
@@ -147,7 +161,41 @@ describe('migrateState', () => {
   it('treats a missing schemaVersion as v1', () => {
     const raw = v1State()
     delete raw.schemaVersion
-    expect(migrateState(raw, SHELL)!.schemaVersion).toBe(2)
+    expect(migrateState(raw, SHELL)!.schemaVersion).toBe(3)
+  })
+
+  it('v3: older workspaces become stacks that keep their grid preset', () => {
+    const raw = { ...v1State(), schemaVersion: 2 }
+    ;(raw.workspaces as Record<string, unknown>[])[0].layout = { rows: 2, cols: 3 }
+    const migrated = migrateState(raw, SHELL)!
+    expect(migrated.workspaces[0].layout).toEqual({ mode: 'stack', rows: 2, cols: 3 })
+    expect(migrated.workspaces[0].rootPath).toBeUndefined()
+    expect(migrated.ui).toEqual({
+      sidebarVisible: true,
+      sidebarWidth: 264,
+      collapsedWorkspaceIds: [],
+      rightSlotWidth: 360
+    })
+  })
+
+  it('v3: keeps a saved mode, rootPath and ui, and repairs bad values', () => {
+    const raw = {
+      ...v1State(),
+      schemaVersion: 3,
+      ui: { sidebarVisible: false, sidebarWidth: 9999, collapsedWorkspaceIds: ['ws-1', 7], rightSlotWidth: 'x' }
+    }
+    const ws = (raw.workspaces as Record<string, unknown>[])[0]
+    ws.layout = { mode: 'grid', rows: 0, cols: 3 }
+    ws.rootPath = '/tmp/project'
+    const migrated = migrateState(raw, SHELL)!
+    expect(migrated.workspaces[0].layout).toEqual({ mode: 'grid', rows: 1, cols: 3 })
+    expect(migrated.workspaces[0].rootPath).toBe('/tmp/project')
+    expect(migrated.ui).toEqual({
+      sidebarVisible: false,
+      sidebarWidth: 400,
+      collapsedWorkspaceIds: ['ws-1'],
+      rightSlotWidth: 360
+    })
   })
 
   it('deep-merges partial agentSettings with defaults', () => {
@@ -175,8 +223,8 @@ describe('migrateState', () => {
   })
 
   it('loads a newer schema best-effort and keeps its version and fields', () => {
-    const migrated = migrateState({ ...v1State(), schemaVersion: 3, futureThing: { a: 1 } }, SHELL)!
-    expect(migrated.schemaVersion).toBe(3)
+    const migrated = migrateState({ ...v1State(), schemaVersion: 4, futureThing: { a: 1 } }, SHELL)!
+    expect(migrated.schemaVersion).toBe(4)
     expect((migrated as unknown as Record<string, unknown>).futureThing).toEqual({ a: 1 })
   })
 

@@ -1,144 +1,159 @@
 import React from 'react'
 import { PanelConfig, PanelStatus } from '../../../shared/types'
+import { isAgentPanel, agentLabel } from '../../../shared/agents'
 import {
-  Folder,
-  Maximize2,
-  Minimize2,
-  X,
-  Bot,
-  Play,
-  RotateCcw,
-  Terminal as TerminalIcon
-} from 'lucide-react'
+  AgentIcon,
+  SparkleIcon,
+  MoreIcon,
+  MaximizeIcon,
+  MinimizeIcon,
+  PlusIcon,
+  CloseIcon,
+  PlayIcon,
+  RotateCcwIcon
+} from './Icons'
 
 interface PanelHeaderProps {
   panel: PanelConfig
+  projectName?: string
   status?: PanelStatus
   statusDetail?: string
   isUnread?: boolean
   isMaximized: boolean
   onSelect: () => void
+  onOpenMenu?: (e: React.MouseEvent) => void
+  onToggleMaximize: () => void
+  onAddPanel?: () => void
+  onClose: () => void
   onLaunchAgent?: () => void
   onRestartAgent?: () => void
-  onToggleMaximize: () => void
-  onClose: () => void
 }
 
 export const PanelHeader: React.FC<PanelHeaderProps> = ({
   panel,
+  projectName = '',
   status = 'idle',
   statusDetail,
   isMaximized,
   onSelect,
-  onLaunchAgent,
-  onRestartAgent,
+  onOpenMenu,
   onToggleMaximize,
-  onClose
+  onAddPanel,
+  onClose,
+  onLaunchAgent,
+  onRestartAgent
 }) => {
-  // Format short cwd (e.g. /Users/sanakulov/Developer/myterm -> myterm or Developer/myterm)
-  const formatCwd = (cwd: string) => {
-    if (!cwd) return '/'
-    const parts = cwd.replace(/\/$/, '').split('/')
-    if (parts.length > 2) {
-      return parts.slice(-2).join('/')
-    }
-    return parts.pop() || cwd
-  }
-
-  const agentLabel =
-    panel.agent === 'claude'
-      ? 'Claude Code'
-      : panel.agent === 'codex'
-      ? 'Codex'
-      : 'Shell'
-
-  // The agent process is alive while running; waiting/done (from hooks) also
-  // mean the agent is still up. Otherwise the panel sits in its fallback shell.
-  const isAgentPanel = panel.agent !== 'none'
+  const isAgent = isAgentPanel(panel)
+  const label = agentLabel(panel)
   const isAgentAlive = status === 'running' || status === 'waiting' || status === 'done'
+  const isAutoNamed = panel.autoName !== false && panel.agent !== 'none'
+  const statusTooltip = `${status}${statusDetail ? ` · ${statusDetail}` : ''}`
 
   return (
-    <div className="panel-header" onClick={onSelect}>
+    <div className="panel-header-bar panel-header" onClick={onSelect}>
       <div className="panel-header-left">
-        {/* Status Dot */}
-        <div
-          className="status-indicator"
-          title={`Status: ${status}${statusDetail ? ` - ${statusDetail}` : ''}`}
-        >
-          <span className={`status-dot ${status}`} />
-          <span style={{ textTransform: 'capitalize' }}>{status}</span>
-        </div>
-
-        {/* Agent Badge & Icon */}
-        <span className={`agent-badge ${panel.agent}`} title={`Agent: ${agentLabel}`}>
-          {panel.agent !== 'none' ? (
-            <Bot size={11} style={{ display: 'inline', marginRight: 3, verticalAlign: -1 }} />
-          ) : (
-            <TerminalIcon size={11} style={{ display: 'inline', marginRight: 3, verticalAlign: -1 }} />
-          )}
-          {agentLabel}
+        {/* Agent Icon (15px) */}
+        <span className="panel-header-agent-icon" aria-hidden="true">
+          <AgentIcon agent={panel.agent} size={15} />
         </span>
 
-        {/* Project Folder Name */}
+        {/* Panel Name (13px/500, ellipsis) */}
+        <span className="panel-header-name" title={panel.title}>
+          {panel.title}
+        </span>
+
+        {/* Sparkle icon when auto-named (13px, tooltip "Auto-named") */}
+        {isAutoNamed && (
+          <span className="auto-named-sparkle" title="Auto-named" aria-label="Auto-named">
+            <SparkleIcon size={13} />
+          </span>
+        )}
+
+        {/* Project Name (13px, caption color) */}
+        {projectName && (
+          <span className="panel-header-project-name" title={projectName}>
+            {projectName}
+          </span>
+        )}
+
+        {/* 8px Status Dot (tooltip with status text) */}
         <span
-          className="panel-cwd"
-          title={`Project Folder: ${panel.cwd}`}
-        >
-          <Folder size={11} />
-          {formatCwd(panel.cwd)}
-        </span>
+          className={`panel-header-status-dot ${status}`}
+          title={statusTooltip}
+          aria-label={statusTooltip}
+        />
       </div>
 
-      <div className="panel-header-right">
-        {/* Launch / Restart agent (respawns the panel shell) */}
-        {isAgentPanel && !isAgentAlive && onLaunchAgent && (
+      {/* Spacer */}
+      <div className="panel-header-spacer" />
+
+      {/* 26px Action Buttons (never shrink) */}
+      <div className="panel-header-actions" onClick={(e) => e.stopPropagation()}>
+        {/* Launch / Restart agent button if configured */}
+        {isAgent && !isAgentAlive && onLaunchAgent && (
           <button
-            className="btn btn-sm btn-icon"
-            title={`Launch ${agentLabel} (restarts this panel's shell)`}
-            onClick={(e) => {
-              e.stopPropagation()
-              onLaunchAgent()
-            }}
+            type="button"
+            className="panel-action-btn launch-btn"
+            title={`Launch ${label} (restarts this panel's shell)`}
+            aria-label={`Launch ${label}`}
+            onClick={onLaunchAgent}
           >
-            <Play size={12} />
+            <PlayIcon size={14} />
           </button>
         )}
-        {isAgentPanel && isAgentAlive && onRestartAgent && (
+        {isAgent && isAgentAlive && onRestartAgent && (
           <button
-            className="btn btn-sm btn-icon"
-            title={`Restart ${agentLabel}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              onRestartAgent()
-            }}
+            type="button"
+            className="panel-action-btn restart-btn"
+            title={`Restart ${label} (restarts this panel's shell)`}
+            aria-label={`Restart ${label}`}
+            onClick={onRestartAgent}
           >
-            <RotateCcw size={12} />
+            <RotateCcwIcon size={14} />
           </button>
         )}
 
-        {/* Maximize / Restore */}
         <button
-          className="btn btn-sm btn-icon"
-          title={isMaximized ? 'Restore grid view (Cmd+Enter)' : 'Maximize panel (Cmd+Enter)'}
-          onClick={(e) => {
-            e.stopPropagation()
-            onToggleMaximize()
-          }}
+          type="button"
+          className="panel-action-btn"
+          onClick={onOpenMenu}
+          title="Panel actions"
+          aria-label="Panel menu"
         >
-          {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          <MoreIcon size={14} />
         </button>
 
-        {/* Close */}
         <button
-          className="btn btn-sm btn-icon"
-          style={{ color: '#f85149' }}
-          title="Close panel (Cmd+W)"
-          onClick={(e) => {
-            e.stopPropagation()
-            onClose()
-          }}
+          type="button"
+          className="panel-action-btn"
+          onClick={onToggleMaximize}
+          title={isMaximized ? 'Restore panel' : 'Maximize panel'}
+          aria-label={isMaximized ? 'Restore panel' : 'Maximize panel'}
         >
-          <X size={12} />
+          {isMaximized ? <MinimizeIcon size={14} /> : <MaximizeIcon size={14} />}
+        </button>
+
+        {onAddPanel && (
+          <button
+            type="button"
+            className="panel-action-btn"
+            onClick={onAddPanel}
+            title="Add panel (Cmd+N)"
+            aria-label="Add panel (Cmd+N)"
+            data-open-new-panel
+          >
+            <PlusIcon size={14} />
+          </button>
+        )}
+
+        <button
+          type="button"
+          className="panel-action-btn close-btn"
+          onClick={onClose}
+          title="Close panel"
+          aria-label="Close panel"
+        >
+          <CloseIcon size={14} />
         </button>
       </div>
     </div>

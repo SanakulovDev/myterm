@@ -1,4 +1,10 @@
-export type AgentKind = 'claude' | 'codex' | 'none'
+import type { AgentDetectionResult, KnownAgentId } from './agents'
+
+// 'none' is a plain shell, 'custom' runs the panel's own agentCommand, and
+// anything else is an agent from src/shared/agents.ts. A state file written by
+// a newer version may hold ids this version does not know; those run their
+// agentCommand like a custom panel.
+export type AgentKind = KnownAgentId | 'custom' | 'none'
 
 export type PanelStatus =
   | 'idle' // shell open, no agent running
@@ -13,9 +19,13 @@ export interface AgentConfigSetting {
   args?: string
 }
 
+// Per-agent overrides of the command and default arguments. claude and codex
+// are always present (schema v2); other agents fall back to the registry
+// defaults when they have no entry.
 export interface AgentSettings {
   claude: AgentConfigSetting
   codex: AgentConfigSetting
+  [agentId: string]: AgentConfigSetting | undefined
 }
 
 export interface PanelConfig {
@@ -23,7 +33,7 @@ export interface PanelConfig {
   title: string
   cwd: string // project folder
   agent: AgentKind
-  agentCommand?: string // e.g. "claude" or "codex"
+  agentCommand?: string // e.g. "claude", "gemini" or a path
   agentArgs?: string // extra arguments e.g. "--verbose"
   shell: string // default: user's login shell
   env?: Record<string, string>
@@ -31,12 +41,34 @@ export interface PanelConfig {
   // it lives in memory and is never persisted.
 }
 
+// Stack shows the panels in one column; grid uses the preset's columns.
+export type LayoutMode = 'stack' | 'grid'
+
+export interface WorkspaceLayout {
+  mode: LayoutMode
+  // The last grid preset. Kept while in stack mode, so Grid restores it.
+  rows: number
+  cols: number
+}
+
+// A workspace is a "project" in the UI.
 export interface WorkspaceConfig {
   id: string
   name: string
-  layout: { rows: number; cols: number }
+  // The project folder (schema v3). New panels start here. Workspaces from
+  // before v3 have none.
+  rootPath?: string
+  layout: WorkspaceLayout
   panels: PanelConfig[]
   panelOrder: string[]
+}
+
+// Window chrome that survives a restart (schema v3).
+export interface UiState {
+  sidebarVisible: boolean
+  sidebarWidth: number
+  collapsedWorkspaceIds: string[]
+  rightSlotWidth: number
 }
 
 export interface AppState {
@@ -45,12 +77,17 @@ export interface AppState {
   lastUsedFolder?: string
   agentSettings: AgentSettings
   window: { x?: number; y?: number; width: number; height: number }
+  ui?: UiState
   schemaVersion: number
 }
 
 export interface LaunchSpec {
   command: string // agent binary name or path (aliases are not supported)
   args?: string // extra args, split on whitespace by the launch shell
+  // A first prompt, passed as one argument (never split or interpreted).
+  prompt?: string
+  // The flag before the prompt (e.g. '-i'); empty puts it after `--`.
+  promptFlag?: string
 }
 
 export interface SpawnPtyOptions {
@@ -73,6 +110,8 @@ export interface ElectronAPI {
 
   // Dialogs
   openDirectory: (defaultPath?: string) => Promise<string | null>
+  // Whether each path is an existing directory (same order as `paths`).
+  pathsExist: (paths: string[]) => Promise<boolean[]>
 
   // Persistence
   loadState: () => Promise<AppState>
@@ -81,6 +120,13 @@ export interface ElectronAPI {
   loadScrollback: (panelId: string) => Promise<string | null>
   // Removes a closed panel's saved output.
   deleteScrollback: (panelId: string) => Promise<boolean>
+
+  // Which agent CLIs the login shell can run. Cached in main; `refresh`
+  // runs the check again.
+  detectAgents: (refresh?: boolean) => Promise<AgentDetectionResult>
+  // Whether a program runs in the panel: a launched agent, or a foreground
+  // command in its shell.
+  isPtyBusy: (id: string) => Promise<boolean>
 
   // System
   getDefaultShell: () => Promise<string>

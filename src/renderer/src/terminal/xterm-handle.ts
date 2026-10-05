@@ -9,6 +9,7 @@ import { ElectronAPI } from '../../../shared/types'
 import { TerminalHandle } from './terminal-registry'
 import { macKeySequence } from './keys'
 import { dropInsertText } from './drop'
+import { DARK_TERMINAL_THEME } from './terminal-themes'
 
 // The font is bundled (main.tsx loads it before any terminal opens), so
 // every Mac renders the same cells. Glyphs it lacks fall back in this order.
@@ -20,8 +21,8 @@ const TERMINAL_OPTIONS: ITerminalOptions = {
   cursorStyle: 'bar',
   fontSize: TERMINAL_FONT_SIZE,
   fontFamily: TERMINAL_FONT_FAMILY,
-  // Rows touch, so box drawing and block art (agent logos, borders) join up.
-  lineHeight: 1,
+  // Specified in Design Tokens (Section 1): terminal 13px, line-height 1.65.
+  lineHeight: 1.65,
   scrollback: 5000,
   // Option sends ESC-prefixed keys (Option+Enter, Option+B, ...) like a
   // terminal's "Option as Meta" setting; Option+click still selects text in
@@ -30,28 +31,7 @@ const TERMINAL_OPTIONS: ITerminalOptions = {
   macOptionClickForcesSelection: true,
   // Needed by the Unicode 11 width tables (terminal.unicode).
   allowProposedApi: true,
-  theme: {
-    background: '#0d1117',
-    foreground: '#c9d1d9',
-    cursor: '#58a6ff',
-    selectionBackground: 'rgba(88, 166, 255, 0.3)',
-    black: '#484f58',
-    red: '#ff7b72',
-    green: '#3fb950',
-    yellow: '#d29922',
-    blue: '#58a6ff',
-    magenta: '#bc8cff',
-    cyan: '#39c5cf',
-    white: '#b1bac4',
-    brightBlack: '#6e7681',
-    brightRed: '#ffa198',
-    brightGreen: '#56d364',
-    brightYellow: '#e3b341',
-    brightBlue: '#79c0ff',
-    brightMagenta: '#d2a8ff',
-    brightCyan: '#56d4dd',
-    brightWhite: '#f0f6fc'
-  },
+  theme: DARK_TERMINAL_THEME,
   allowTransparency: true
 }
 
@@ -157,6 +137,7 @@ export function createXtermHandle(app: XtermHost): TerminalHandle {
     },
 
     write: (data) => term.write(data),
+    paste: (text) => term.paste(text),
 
     onData(listener) {
       term.onData(listener)

@@ -1,4 +1,5 @@
 import { ElectronAPI, LaunchSpec, PanelConfig } from '../../../shared/types'
+import { NO_AGENT, promptFlag } from '../../../shared/agents'
 import { Disposable, WebglBudget } from './webgl-budget'
 import { whenIdle } from './idle'
 
@@ -16,6 +17,10 @@ import { whenIdle } from './idle'
 
 export const AUTOSAVE_INTERVAL_MS = 30_000
 
+// Between a pasted prompt and the Enter that submits it. Agent TUIs handle a
+// paste asynchronously; an Enter in the same chunk can land inside the paste.
+export const PROMPT_SUBMIT_DELAY_MS = 120
+
 /** What the registry needs from one xterm instance (see xterm-handle.ts). */
 export interface TerminalHandle {
   readonly cols: number
@@ -25,6 +30,8 @@ export interface TerminalHandle {
   /** Moves the host element into the hidden parking lot. */
   park(): void
   write(data: string): void
+  /** Types `text` as a paste (bracketed when the program asked for it). */
+  paste(text: string): void
   onData(listener: (data: string) => void): void
   /** Fits to the container. Returns false when the container has no usable size. */
   fit(): boolean
@@ -94,19 +101,30 @@ export interface SessionDebugInfo {
   dirty: boolean
 }
 
-export function getLaunchSpec(panel: PanelConfig): LaunchSpec | undefined {
-  if (panel.agent === 'none') return undefined
+/**
+ * How a panel's agent is launched. A first prompt is passed only to agents
+ * known to take one; others start without it.
+ */
+export function getLaunchSpec(panel: PanelConfig, prompt?: string): LaunchSpec | undefined {
+  if (panel.agent === NO_AGENT) return undefined
   const command = panel.agentCommand?.trim() || panel.agent
-  return { command, args: panel.agentArgs }
+  const spec: LaunchSpec = { command, args: panel.agentArgs }
+  const flag = promptFlag(panel.agent)
+  if (prompt?.trim() && flag !== undefined) {
+    spec.prompt = prompt
+    spec.promptFlag = flag
+  }
+  return spec
 }
 
 export class TerminalRegistry {
   private readonly sessions = new Map<string, Session>()
   // Containers of mounted panels, kept even before their session exists.
   private readonly containers = new Map<string, HTMLElement>()
-  // Panels just created from the New Panel dialog whose first spawn launches
-  // the agent. In memory only, so restored panels never auto-launch.
-  private readonly pendingLaunch = new Set<string>()
+  // Panels just created (New Panel, a lineup, the command bar) whose first
+  // spawn launches the agent, with its first prompt if any. In memory only,
+  // so restored panels never auto-launch.
+  private readonly pendingLaunch = new Map<string, string | undefined>()
   private unsubscribeData: (() => void) | null = null
   private autosaveTimer: ReturnType<typeof setInterval> | null = null
   private autosaving = false
@@ -115,8 +133,8 @@ export class TerminalRegistry {
 
   constructor(private readonly deps: TerminalRegistryDeps) {}
 
-  markLaunchPending(id: string): void {
-    this.pendingLaunch.add(id)
+  markLaunchPending(id: string, prompt?: string): void {
+    this.pendingLaunch.set(id, prompt)
   }
 
   isLaunchPending(id: string): boolean {
@@ -186,9 +204,9 @@ export class TerminalRegistry {
    * Header Launch / Restart: respawns the PTY through the launch script (main
    * kills the current shell or agent first) and keeps the terminal as is.
    */
-  launch(panel: PanelConfig): void {
+  launch(panel: PanelConfig, prompt?: string): void {
     const session = this.sessions.get(panel.id)
-    const launch = getLaunchSpec(panel)
+    const launch = getLaunchSpec(panel, prompt)
     if (!session || !launch) return
     session.panel = panel
     session.term.write(`\r\n\x1b[90m[Agent Terminal] Starting ${launch.command}\x1b[0m\r\n`)
@@ -202,7 +220,23 @@ export class TerminalRegistry {
     session.panel = panel
     if (!session.started) return
     if (panel.cwd === session.spawned.cwd && panel.shell === session.spawned.shell) return
-    void this.spawn(session, this.pendingLaunch.has(panel.id) ? getLaunchSpec(panel) : undefined)
+    void this.spawn(session, this.pendingSpec(panel))
+  }
+
+  /**
+   * Types `text` into the panel's running program as one paste, then presses
+   * Enter when `submit`. Returns false when the panel has no terminal yet.
+   */
+  sendPrompt(id: string, text: string, submit = true): boolean {
+    const session = this.sessions.get(id)
+    if (!session?.started || !text) return false
+    session.term.paste(text)
+    if (submit) {
+      setTimeout(() => {
+        if (this.sessions.get(id) === session) this.deps.api.writePty(id, '\r')
+      }, PROMPT_SUBMIT_DELAY_MS)
+    }
+    return true
   }
 
   /** The panel was closed. The caller kills its PTY. Its saved output goes too. */
@@ -314,8 +348,12 @@ export class TerminalRegistry {
     if (this.sessions.get(session.id) !== session || session.started) return
     if (saved) session.term.write(saved)
 
-    const launch = this.pendingLaunch.has(session.id) ? getLaunchSpec(session.panel) : undefined
-    await this.spawn(session, launch)
+    await this.spawn(session, this.pendingSpec(session.panel))
+  }
+
+  private pendingSpec(panel: PanelConfig): LaunchSpec | undefined {
+    if (!this.pendingLaunch.has(panel.id)) return undefined
+    return getLaunchSpec(panel, this.pendingLaunch.get(panel.id))
   }
 
   private async spawn(session: Session, launch: LaunchSpec | undefined): Promise<void> {
